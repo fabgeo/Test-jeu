@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quiz Culture G</title>
-  <link rel="stylesheet" href="css/style.css?v=202611060859" />
+  <link rel="stylesheet" href="css/style.css?v=202611060906" />
 </head>
 <body>
   <main class="app">
@@ -43,6 +43,7 @@
 
         <div id="settings-zone">
         <h2>Thème</h2>
+        <p class="hint">Astuce : coche la case ☐ de plusieurs chapitres pour les réviser ensemble.</p>
         <div id="themes-list"></div>
         <div id="custom-picker" class="custom-picker hidden"></div>
         <p id="setup-msg" class="feedback bad"></p>
@@ -149,6 +150,7 @@
         <h2 id="q-text"></h2>
         <div id="q-choices" class="choices"></div>
         <p id="q-feedback" class="feedback"></p>
+        <button id="validate-btn" class="btn-primary hidden">✔ Valider ma réponse</button>
         <div id="q-explain" class="explain hidden"></div>
         <p id="q-wait" class="hint"></p>
         <div id="q-live" class="live-scores"></div>
@@ -188,31 +190,31 @@
 
   </main>
 
-  <script src="js/questions.js?v=202611060859"></script>
-  <script src="js/themes/cejm/setup.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch01.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch02.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch03.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch04.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch05.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch06.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch07.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch08.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch09.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch10.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch11.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch12.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch13.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch14.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch15.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch16.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch17.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch18.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch19.js?v=202611060859"></script>
-  <script src="js/themes/cejm/ch20.js?v=202611060859"></script>
-  <script src="js/themes/cejm/build.js?v=202611060859"></script>
-  <script src="js/lib/mqtt.min.js?v=202611060859"></script>
-  <script src="js/game.js?v=202611060859"></script>
-  <script src="js/online.js?v=202611060859"></script>
+  <script src="js/questions.js?v=202611060906"></script>
+  <script src="js/themes/cejm/setup.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch01.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch02.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch03.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch04.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch05.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch06.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch07.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch08.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch09.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch10.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch11.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch12.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch13.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch14.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch15.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch16.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch17.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch18.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch19.js?v=202611060906"></script>
+  <script src="js/themes/cejm/ch20.js?v=202611060906"></script>
+  <script src="js/themes/cejm/build.js?v=202611060906"></script>
+  <script src="js/lib/mqtt.min.js?v=202611060906"></script>
+  <script src="js/game.js?v=202611060906"></script>
+  <script src="js/online.js?v=202611060906"></script>
 </body>
 </html>

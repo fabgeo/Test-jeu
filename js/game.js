@@ -143,8 +143,19 @@ function renderSetupPicker() {
   if (settings.theme === CUSTOM_KEY) renderChapterPicker(box, () => { $("#setup-msg").textContent = ""; renderThemes(); updateRange(); });
 }
 
+function toggleChapter(key) {
+  if (customSel.has(key)) customSel.delete(key); else customSel.add(key);
+  updateCustomTheme();
+  settings.theme = CUSTOM_KEY;
+  openGroups.add("🎯 Sélection personnalisée");
+  $("#setup-msg").textContent = "";
+  renderThemes();
+  updateRange();
+}
+
 function renderThemes() {
   const list = $("#themes-list");
+  const picker = $("#custom-picker"); // on le replace dans le groupe « Sélection personnalisée »
   list.innerHTML = "";
   themeGroups().forEach((items, group) => {
     const hasActive = items.some(([k]) => k === settings.theme);
@@ -158,11 +169,16 @@ function renderThemes() {
     items.forEach(([key, t]) => {
       const b = document.createElement("button");
       b.className = "theme" + (key === settings.theme ? " active" : "");
-      b.innerHTML = `<span class="t-icon">${t.icon || "📚"}</span><strong>${escapeHtml(t.name)}</strong><br><span class="t-count">${t.questions.length} questions</span>`;
-      b.onclick = () => { settings.theme = key; renderThemes(); updateRange(); $("#setup-msg").textContent = ""; };
+      b.innerHTML = `<span class="t-icon">${t.icon || "📚"}</span><strong>${escapeHtml(t.name)}</strong><br><span class="t-count">${t.questions.length} questions</span>` +
+        (t.selectable ? `<span class="pick-box ${customSel.has(key) ? "on" : ""}" title="Ajouter à ma sélection de chapitres">${customSel.has(key) ? "✓" : ""}</span>` : "");
+      b.onclick = (e) => {
+        if (e.target.closest(".pick-box")) return toggleChapter(key);
+        settings.theme = key; renderThemes(); updateRange(); $("#setup-msg").textContent = "";
+      };
       grid.appendChild(b);
     });
     det.appendChild(grid);
+    if (items.some(([k]) => k === CUSTOM_KEY)) det.appendChild(picker);
     list.appendChild(det);
   });
 }
@@ -224,6 +240,7 @@ function setupListeners() {
     }
   };
 
+  $("#validate-btn").onclick = () => { if (game && game.selected >= 0) answer(game.selected); };
   $("#pause-btn").onclick = () => (Online.active ? Online.togglePause() : togglePauseLocal());
   $("#resume-btn").onclick = () => (Online.active ? Online.togglePause() : togglePauseLocal());
   $("#start-btn").onclick = () => {
@@ -261,6 +278,7 @@ function makeChoiceButton(text, i, onPick) {
 // Montre la bonne réponse (✔), la mauvaise choisie (✖), grise les autres,
 // et affiche le message + l'explication si c'est raté.
 function revealAnswer({ answer, picked, pts, correctText, explain }) {
+  $("#validate-btn").classList.add("hidden");
   const buttons = $$("#q-choices .choice");
   buttons.forEach((b, i) => {
     b.disabled = true;
@@ -350,6 +368,7 @@ function showQuestion() {
   const q = game.questions[game.qIndex];
   const p = game.players[game.pIndex];
   game.answered = false;
+  game.selected = -1;
 
   $("#q-player").textContent = "👤 " + p.name;
   $("#q-progress").textContent = `Question ${game.qIndex + 1} / ${game.questions.length}`;
@@ -366,7 +385,8 @@ function showQuestion() {
 
   const box = $("#q-choices");
   box.innerHTML = "";
-  q.choices.forEach((c, i) => box.appendChild(makeChoiceButton(c, i, answer)));
+  q.choices.forEach((c, i) => box.appendChild(makeChoiceButton(c, i, selectLocal)));
+  $("#validate-btn").classList.add("hidden");
 
   showScreen("screen-question");
   startTimer();
@@ -410,7 +430,7 @@ function runTimer() {
   clearInterval(timerId);
   drawTimer(game.startTime, settings.time);
   timerId = setInterval(() => {
-    if (drawTimer(game.startTime, settings.time) <= 0) answer(-1);
+    if (drawTimer(game.startTime, settings.time) <= 0) answer(game.selected); // la case sélectionnée est validée
   }, 100);
 }
 
@@ -429,11 +449,22 @@ function togglePauseLocal() {
   }
 }
 
+// Un clic sélectionne la case (on peut changer), « Valider » confirme
+function selectLocal(i) {
+  if (game.answered || game.paused) return;
+  game.selected = i;
+  $$("#q-choices .choice").forEach((x, j) => { x.classList.toggle("picked", j === i); x.classList.toggle("unpicked", j !== i); });
+  $("#validate-btn").classList.remove("hidden");
+  $("#q-feedback").textContent = "Tu peux encore changer, puis clique sur « Valider »";
+  $("#q-feedback").className = "feedback";
+}
+
 function answer(choice) {
   if (game.answered || game.paused) return;
   game.answered = true;
   clearInterval(timerId);
   showPauseButton(false);
+  $("#validate-btn").classList.add("hidden");
 
   const q = game.questions[game.qIndex];
   const p = game.players[game.pIndex];

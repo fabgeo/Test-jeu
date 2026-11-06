@@ -227,3 +227,15 @@ select {
 .cp-item span { color: var(--muted); font-size: .8rem; margin-left: auto; }
 .cp-count { margin-top: 8px; font-weight: 700; color: #c7d2fe; }
 .choice.unpicked { opacity: .55; }
+
+/* Case à cocher sur les cartes de chapitres */
+.theme { position: relative; }
+.pick-box {
+  position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; border-radius: 8px;
+  display: grid; place-items: center; font-size: 1.25rem; line-height: 1;
+  background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+}
+.pick-box:hover { border-color: var(--primary); color: #fff; }
+.pick-box.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+.theme .t-icon { padding-right: 34px; }
+.theme-group .custom-picker { margin: 0 10px 10px; }

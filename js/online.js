@@ -386,8 +386,8 @@ const Online = (() => {
     hostTick();
   }
 
-  // Quand tout le monde a répondu : encore 3 s pour changer d'avis, puis on révèle
-  const LAST_CHANCE_MS = 3000;
+  // Quand tout le monde a répondu : encore 5 s pour changer d'avis, puis on révèle
+  const LAST_CHANCE_MS = 5000;
   function checkAllAnswered() {
     const active = activePlayers();
     if (!active.length || !active.every((p) => st.answers[p.id]) || st.soonTimer) return;
@@ -706,6 +706,7 @@ const Online = (() => {
     $("#q-live").innerHTML = "";
     $("#q-explain").classList.add("hidden");
     $("#next-btn").classList.add("hidden");
+    $("#validate-btn").classList.add("hidden");
     $("#q-players").classList.remove("hidden");
     setPauseUI(false);
     showPauseButton(isHost && !!m.time);

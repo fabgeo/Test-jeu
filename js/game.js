@@ -16,6 +16,7 @@ const settings = {
   nbQuestions: 10,
   nbWanted: 10, // nombre choisi par le joueur (nbQuestions est limité au nombre de questions du thème)
   time: 20,
+  hard: false, // mode difficile : on écrit sa réponse
   players: ["Joueur 1", "Joueur 2"],
 };
 
@@ -183,9 +184,12 @@ function renderThemes() {
   });
 }
 
+// Nombre de questions jouables pour un thème (en difficile, certaines questions sont exclues)
+const playableCount = (themeKey, hard) => (hard ? hardPool(themeKey).length : (THEMES[themeKey] ? THEMES[themeKey].questions.length : 0));
+
 function updateRange() {
   renderSetupPicker();
-  const max = Math.max(1, THEMES[settings.theme].questions.length);
+  const max = Math.max(1, playableCount(settings.theme, settings.hard));
   const range = $("#nb-questions");
   range.max = max;
   range.min = Math.min(5, max);
@@ -228,6 +232,13 @@ function setupListeners() {
     settings.time = Number(b.dataset.time);
   });
 
+  $$("#hard-group .toggle").forEach((b) => b.onclick = () => {
+    $$("#hard-group .toggle").forEach((x) => x.classList.remove("active"));
+    b.classList.add("active");
+    settings.hard = b.dataset.hard === "1";
+    updateRange();
+  });
+
   $("#nb-questions").oninput = (e) => {
     settings.nbQuestions = settings.nbWanted = Number(e.target.value);
     $("#nb-questions-value").textContent = settings.nbQuestions;
@@ -244,7 +255,7 @@ function setupListeners() {
   $("#pause-btn").onclick = () => (Online.active ? Online.togglePause() : togglePauseLocal());
   $("#resume-btn").onclick = () => (Online.active ? Online.togglePause() : togglePauseLocal());
   $("#start-btn").onclick = () => {
-    if (!THEMES[settings.theme].questions.length) { $("#setup-msg").textContent = "Coche au moins un chapitre dans « Mes chapitres »."; return; }
+    if (!playableCount(settings.theme, settings.hard)) { $("#setup-msg").textContent = "Coche au moins un chapitre dans « Mes chapitres »."; return; }
     $("#setup-msg").textContent = "";
     settings.mode === "online" ? Online.host() : startGame();
   };
@@ -333,7 +344,7 @@ function buildQuestions(themeKey, n) {
 
 // ---------- Déroulement de la partie ----------
 function startGame() {
-  if (!THEMES[settings.theme].questions.length) {
+  if (!playableCount(settings.theme, settings.hard)) {
     $("#setup-msg").textContent = "Coche au moins un chapitre dans « Mes chapitres ».";
     return;
   }
@@ -341,7 +352,9 @@ function startGame() {
   const names = (settings.mode === "solo" ? settings.players.slice(0, 1) : settings.players)
     .map((n, i) => n.trim() || "Joueur " + (i + 1));
 
-  const questions = buildQuestions(settings.theme, settings.nbQuestions);
+  const questions = settings.hard
+    ? buildHardQuestions(settings.theme, settings.nbQuestions)
+    : buildQuestions(settings.theme, settings.nbQuestions);
 
   game = {
     questions,
@@ -385,11 +398,47 @@ function showQuestion() {
 
   const box = $("#q-choices");
   box.innerHTML = "";
-  q.choices.forEach((c, i) => box.appendChild(makeChoiceButton(c, i, selectLocal)));
+  hideHardZones();
   $("#validate-btn").classList.add("hidden");
+  if (q.hard) showHardInput((text) => submitHardLocal(text));
+  else q.choices.forEach((c, i) => box.appendChild(makeChoiceButton(c, i, selectLocal)));
 
   showScreen("screen-question");
   startTimer();
+}
+
+// ---------- Mode difficile en solo / même appareil : le joueur se corrige lui-même ----------
+function submitHardLocal(text) {
+  if (game.answered || game.paused) return;
+  game.answered = true;
+  clearInterval(timerId);
+  showPauseButton(false);
+  const q = game.questions[game.qIndex];
+  const p = game.players[game.pIndex];
+  const ms = Date.now() - game.startTime;
+  $("#hard-input").disabled = true;
+  $("#hard-zone").classList.add("hidden");
+  $("#q-feedback").textContent = text ? "Corrige-toi honnêtement 😉" : "⏰ Pas de réponse";
+  $("#q-feedback").className = "feedback";
+  const zone = $("#judge-zone");
+  zone.classList.remove("hidden");
+  renderJudge(zone, {
+    model: q.model, explain: q.explain, canJudge: true, title: "Ta réponse — choisis ta note",
+    entries: [{ id: "me", name: p.name, text, auto: autoGrade(text, q.model) }],
+    onSubmit: (v) => {
+      const verdict = v.me;
+      const pts = hardPoints(verdict, ms, settings.time);
+      p.score += pts;
+      if (verdict === "juste") p.correct++;
+      zone.querySelectorAll(".jv, .judge-submit").forEach((b) => (b.disabled = true));
+      const fb = $("#q-feedback");
+      fb.textContent = verdict === "juste" ? `✅ Juste ! +${pts} pts` : verdict === "approx" ? `🟡 Approximatif : +${pts} pts` : "❌ Faux";
+      fb.className = "feedback big " + (verdict === "juste" ? "good" : verdict === "approx" ? "approx" : "bad");
+      $("#q-score").textContent = p.score + " pts";
+      $("#next-btn").classList.remove("hidden");
+      $("#next-btn").focus();
+    },
+  });
 }
 
 // ---------- Pause (commun) ----------
@@ -430,7 +479,9 @@ function runTimer() {
   clearInterval(timerId);
   drawTimer(game.startTime, settings.time);
   timerId = setInterval(() => {
-    if (drawTimer(game.startTime, settings.time) <= 0) answer(game.selected); // la case sélectionnée est validée
+    if (drawTimer(game.startTime, settings.time) > 0) return;
+    if (game.questions[game.qIndex].hard) submitHardLocal($("#hard-input").value.trim()); // ce qui est écrit est envoyé
+    else answer(game.selected); // la case sélectionnée est validée
   }, 100);
 }
 

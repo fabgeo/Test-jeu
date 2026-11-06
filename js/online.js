@@ -126,7 +126,7 @@ const Online = (() => {
     const code = resume ? resume.code : genCode();
     st = resume || {
       code, phase: "lobby", qi: 0, questions: [], answers: {}, paused: false, broker: 0,
-      conf: { theme: settings.theme, nb: settings.nbQuestions, nbWanted: settings.nbWanted, time: settings.time },
+      conf: { theme: settings.theme, nb: settings.nbQuestions, nbWanted: settings.nbWanted, time: settings.time, hard: settings.hard },
       players: [{ id: "host", name: myName(), score: 0, correct: 0 }],
     };
     st.timer = null;
@@ -183,6 +183,7 @@ const Online = (() => {
     const now = st.paused ? st.pausedAt : Date.now();
     broadcast({ ...st.lastQuestion, players: publicPlayers(), elapsed: now - st.qStart - st.pausedTotal });
     if (st.phase === "question" && st.paused) broadcast({ t: "pause" });
+    if (st.phase === "judge") broadcast(st.lastJudge);
     if (st.phase === "reveal") broadcast(st.lastReveal);
   }
 
@@ -237,14 +238,14 @@ const Online = (() => {
   }
 
   // Nombre de questions réel : celui choisi, limité au nombre de questions du thème
-  const effNb = () => Math.max(1, Math.min(st.conf.nbWanted || st.conf.nb, (THEMES[st.conf.theme] || { questions: [] }).questions.length || 1));
+  const effNb = () => Math.max(1, Math.min(st.conf.nbWanted || st.conf.nb, playableCount(st.conf.theme, st.conf.hard) || 1));
 
   function lobbyMsg() {
     st.conf.nb = effNb();
     const t = THEMES[st.conf.theme] || THEMES[Object.keys(THEMES)[0]];
     return {
       t: "lobby", code: st.code, players: presenceList(),
-      info: `${t.icon || "📚"} ${t.name} · ${st.conf.nb} questions · ${st.conf.time ? st.conf.time + " s par question" : "temps illimité"}`,
+      info: `${t.icon || "📚"} ${t.name} · ${st.conf.nb} questions · ${st.conf.time ? st.conf.time + " s par question" : "temps illimité"} · ${st.conf.hard ? "✍️ Difficile (on écrit)" : "🙂 Facile (4 choix)"}`,
     };
   }
   function broadcastLobby() { broadcast(lobbyMsg()); persistHost(); }
@@ -294,7 +295,7 @@ const Online = (() => {
       broadcastLobby();
     }
 
-    if (d.t === "answer") onAnswer(id, d.qi, d.choice, d.ms);
+    if (d.t === "answer") onAnswer(id, d.qi, d.choice, d.ms, d.text);
   }
 
   // Renvoie l'état actuel à un joueur qui (re)arrive
@@ -304,6 +305,7 @@ const Online = (() => {
     const now = st.paused ? st.pausedAt : Date.now();
     sendTo(id, { ...st.lastQuestion, players: publicPlayers(), elapsed: now - st.qStart - st.pausedTotal });
     if (st.phase === "question" && st.paused) sendTo(id, { t: "pause" });
+    if (st.phase === "judge") sendTo(id, st.lastJudge);
     if (st.phase === "reveal") sendTo(id, st.lastReveal);
   }
 
@@ -326,12 +328,12 @@ const Online = (() => {
 
   function startOnline() {
     if (!st || st.phase !== "lobby") return;
-    if (!THEMES[st.conf.theme] || !THEMES[st.conf.theme].questions.length) {
+    if (!playableCount(st.conf.theme, st.conf.hard)) {
       $("#lobby-start").disabled = false;
       $("#lobby-status").textContent = "⚠️ Coche au moins un chapitre dans « Mes chapitres ».";
       return;
     }
-    st.questions = buildQuestions(st.conf.theme, effNb());
+    st.questions = st.conf.hard ? buildHardQuestions(st.conf.theme, effNb()) : buildQuestions(st.conf.theme, effNb());
     st.players = st.players.filter((p) => !p.left);
     st.players.forEach((p) => { p.score = 0; p.correct = 0; });
     askQuestion(0);
@@ -345,7 +347,7 @@ const Online = (() => {
     st.qStart = Date.now();
     st.pausedTotal = 0;
     const q = st.questions[qi];
-    st.lastQuestion = { t: "question", qi, total: st.questions.length, q: q.q, choices: q.choices, time: st.conf.time };
+    st.lastQuestion = { t: "question", qi, total: st.questions.length, q: q.q, choices: q.hard ? [] : q.choices, hard: !!q.hard, time: st.conf.time };
     broadcast({ ...st.lastQuestion, players: publicPlayers(), elapsed: 0 });
     clearTimeout(st.timer);
     if (st.conf.time) {
@@ -377,11 +379,11 @@ const Online = (() => {
   };
 
   // Un joueur peut changer de réponse tant qu'elle n'est pas révélée (on garde la dernière)
-  function onAnswer(id, qi, choice, ms) {
+  function onAnswer(id, qi, choice, ms, text) {
     if (!st || st.phase !== "question" || qi !== st.qi) return;
     if (!st.players.some((p) => p.id === id && !p.left)) return;
     const first = !st.answers[id];
-    st.answers[id] = { choice: Number(choice), ms: Math.max(0, Number(ms) || 0) };
+    st.answers[id] = { choice: Number(choice), ms: Math.max(0, Number(ms) || 0), text: String(text || "").slice(0, 300) };
     if (first) broadcast({ t: "progress", count: Object.keys(st.answers).length, total: activePlayers().length });
     hostTick();
   }
@@ -399,9 +401,21 @@ const Online = (() => {
     if (!st || st.phase !== "question") return;
     clearTimeout(st.timer);
     clearTimeout(st.soonTimer); st.soonTimer = null;
-    st.phase = "reveal";
     st.paused = false;
     const q = st.questions[st.qi];
+    if (q.hard) {
+      st.phase = "judge";
+      st.lastJudge = {
+        t: "judge", qi: st.qi, model: q.model, explain: q.explain,
+        entries: st.players.filter((p) => !p.left || st.answers[p.id]).map((p) => {
+          const a = st.answers[p.id];
+          return { id: p.id, name: p.name, text: a ? a.text : "", auto: autoGrade(a ? a.text : "", q.model) };
+        }),
+      };
+      broadcast(st.lastJudge);
+      return hostTick();
+    }
+    st.phase = "reveal";
     const results = {};
     st.players.forEach((p) => {
       const a = st.answers[p.id];
@@ -415,6 +429,25 @@ const Online = (() => {
       results[p.id] = { choice: a ? a.choice : -1, pts };
     });
     st.lastReveal = { t: "reveal", qi: st.qi, answer: q.answer, correctText: q.choices[q.answer], explain: q.explain, results, players: publicPlayers(), last: st.qi >= st.questions.length - 1 };
+    broadcast(st.lastReveal);
+    hostTick();
+  }
+
+  // L'hôte valide la correction : on attribue les points
+  function finishJudge(verdicts) {
+    if (!st || st.phase !== "judge") return;
+    const q = st.questions[st.qi];
+    const results = {};
+    st.players.forEach((p) => {
+      const a = st.answers[p.id];
+      const verdict = verdicts[p.id] || (a ? autoGrade(a.text, q.model) : "faux");
+      const pts = a ? hardPoints(verdict, a.ms, st.conf.time) : 0;
+      p.score += pts;
+      if (verdict === "juste" && a) p.correct++;
+      results[p.id] = { verdict: a ? verdict : "faux", pts, text: a ? a.text : "" };
+    });
+    st.phase = "reveal";
+    st.lastReveal = { t: "reveal", hard: true, qi: st.qi, model: q.model, explain: q.explain, results, players: publicPlayers(), last: st.qi >= st.questions.length - 1 };
     broadcast(st.lastReveal);
     hostTick();
   }
@@ -553,9 +586,9 @@ const Online = (() => {
     if (!atEnd) fail("L'hôte a quitté la partie.");
   }
 
-  function sendAnswer(choice, ms) {
-    if (isHost) onAnswer("host", view.qi, choice, ms);
-    else if (hostConn) hostConn.send({ t: "answer", qi: view.qi, choice, ms });
+  function sendAnswer(choice, ms, text) {
+    if (isHost) onAnswer("host", view.qi, choice, ms, text);
+    else if (hostConn) hostConn.send({ t: "answer", qi: view.qi, choice, ms, text });
   }
 
   // Quitter volontairement
@@ -640,6 +673,8 @@ const Online = (() => {
         }
         break;
 
+      case "judge": showJudge(m); break;
+
       case "reveal": showReveal(m); break;
 
       case "end": showEnd(m); break;
@@ -683,6 +718,11 @@ const Online = (() => {
         clearInterval(localTimer);
         view.closed = true; // plus possible de répondre ni de changer
         $$("#q-choices .choice").forEach((x) => (x.disabled = true));
+        if (view.hard) {
+          const txt = $("#hard-input").value.trim();
+          if (txt && txt !== view.sentText) { view.answered = true; view.sentText = txt; sendAnswer(-1, Date.now() - view.start, txt); }
+          $("#hard-input").disabled = true; $("#hard-submit").disabled = true;
+        }
         $("#q-feedback").textContent = view.answered ? "⏰ Temps écoulé — ta réponse est enregistrée" : "⏰ Temps écoulé !";
         $("#q-feedback").className = view.answered ? "feedback" : "feedback bad";
       }
@@ -692,7 +732,7 @@ const Online = (() => {
   }
 
   function showOnlineQuestion(m) {
-    view = { phase: "question", qi: m.qi, start: Date.now() - (m.elapsed || 0), time: m.time, answered: false, paused: false, closed: false, choice: -1 };
+    view = { phase: "question", qi: m.qi, start: Date.now() - (m.elapsed || 0), time: m.time, answered: false, paused: false, closed: false, choice: -1, hard: !!m.hard, sentText: "" };
     const mine = me(m.players);
 
     $("#q-player").textContent = "👤 " + mine.name;
@@ -713,7 +753,21 @@ const Online = (() => {
 
     const box = $("#q-choices");
     box.innerHTML = "";
-    m.choices.forEach((c, i) => {
+    hideHardZones();
+    if (m.hard) {
+      // Réponse écrite : on peut la renvoyer (modifier) tant que la question n'est pas close
+      showHardInput((text) => {
+        if (view.closed || view.paused || view.phase !== "question" || !text || text === view.sentText) return;
+        view.answered = true;
+        view.sentText = text;
+        sendAnswer(-1, Date.now() - view.start, text);
+        $("#hard-submit").textContent = "✏️ Modifier ma réponse";
+        $("#q-feedback").textContent = "Réponse envoyée ✔ — tu peux encore la modifier";
+        $("#q-feedback").className = "feedback";
+        if (isHost && view.phase === "question") showSkip();
+      });
+    }
+    (m.hard ? [] : m.choices).forEach((c, i) => {
       const b = makeChoiceButton(c, i, () => {
         if (view.closed || view.paused || view.phase !== "question" || view.choice === i) return;
         view.answered = true;
@@ -740,12 +794,38 @@ const Online = (() => {
     btn.classList.remove("hidden");
   }
 
+  // Phase de correction (mode difficile) : l'hôte attribue les points, les autres attendent
+  function showJudge(m) {
+    clearInterval(localTimer);
+    if (!view) view = {};
+    view.phase = "judge";
+    view.closed = true;
+    view.paused = false;
+    setPauseUI(false);
+    showPauseButton(false);
+    $("#hard-zone").classList.add("hidden");
+    $("#next-btn").classList.add("hidden");
+    const mine = m.entries.find((e) => e.id === myId);
+    $("#q-feedback").textContent = isHost ? "✍️ Corrige les réponses, puis valide" : "⏳ L'hôte corrige les réponses…";
+    $("#q-feedback").className = "feedback";
+    $("#q-wait").textContent = !isHost && mine ? `Ta réponse : ${mine.text ? "« " + mine.text + " »" : "— pas de réponse —"}` : "";
+    const zone = $("#judge-zone");
+    zone.classList.remove("hidden");
+    renderJudge(zone, {
+      model: m.model, explain: m.explain, entries: m.entries, canJudge: isHost, myId,
+      title: isHost ? "Réponses des joueurs — choisis la note de chacun" : "Réponses des joueurs",
+      onSubmit: (verdicts) => finishJudge(verdicts),
+    });
+  }
+
   function showReveal(m) {
     clearInterval(localTimer);
     if (!view) view = {};
     view.phase = "reveal";
     view.paused = false;
     showPauseButton(false);
+    if (m.hard) return showHardReveal(m);
+    hideHardZones();
     const r = m.results[myId] || { choice: -1, pts: 0 };
     revealAnswer({ answer: m.answer, picked: r.choice, pts: r.pts, correctText: m.correctText, explain: m.explain });
     $("#q-score").textContent = me(m.players).score + " pts";
@@ -755,6 +835,35 @@ const Online = (() => {
       return `<span class="${res.pts ? "ok" : "ko"}">${i + 1}. ${escapeHtml(p.name)} · ${p.score} pts${res.pts ? " (+" + res.pts + ")" : ""}</span>`;
     }).join("");
 
+    const btn = $("#next-btn");
+    if (isHost) {
+      btn.textContent = m.last ? "Voir les résultats 🏁" : "Question suivante ➜";
+      btn.classList.remove("hidden");
+      $("#q-wait").textContent = "";
+    } else {
+      btn.classList.add("hidden");
+      $("#q-wait").textContent = "En attente de l'hôte pour la suite…";
+    }
+  }
+
+  function showHardReveal(m) {
+    $("#hard-zone").classList.add("hidden");
+    const r = m.results[myId] || { verdict: "faux", pts: 0, text: "" };
+    const fb = $("#q-feedback");
+    fb.textContent = r.verdict === "juste" ? `✅ Juste ! +${r.pts} pts` : r.verdict === "approx" ? `🟡 Approximatif : +${r.pts} pts` : "❌ Faux";
+    fb.className = "feedback big " + (r.verdict === "juste" ? "good" : r.verdict === "approx" ? "approx" : "bad");
+    $("#q-score").textContent = me(m.players).score + " pts";
+    const zone = $("#judge-zone");
+    zone.classList.remove("hidden");
+    renderJudge(zone, {
+      model: m.model, explain: m.explain, canJudge: false, myId, title: "Correction de l'hôte",
+      entries: m.players.filter((p) => m.results[p.id]).map((p) => ({ id: p.id, name: p.name, text: m.results[p.id].text, auto: m.results[p.id].verdict })),
+    });
+    zone.querySelectorAll(".judge-auto").forEach((x) => (x.textContent = x.textContent.replace("suggestion : ", "note : ")));
+    $("#q-live").innerHTML = m.players.map((p, i) => {
+      const res = m.results[p.id] || { pts: 0, verdict: "faux" };
+      return `<span class="${res.pts ? "ok" : "ko"}">${i + 1}. ${VERDICTS[res.verdict].short} ${escapeHtml(p.name)} · ${p.score} pts${res.pts ? " (+" + res.pts + ")" : ""}</span>`;
+    }).join("");
     const btn = $("#next-btn");
     if (isHost) {
       btn.textContent = m.last ? "Voir les résultats 🏁" : "Question suivante ➜";
@@ -804,8 +913,9 @@ const Online = (() => {
     const picker = $("#lobby-custom-picker");
     picker.classList.toggle("hidden", c.theme !== CUSTOM_KEY);
     if (c.theme === CUSTOM_KEY) renderChapterPicker(picker, () => { if (st) broadcastLobby(); });
-    const max = Math.max(1, THEMES[c.theme].questions.length);
+    const max = Math.max(1, playableCount(c.theme, c.hard));
     c.nb = Math.min(c.nbWanted || c.nb, max);
+    $$("#lobby-hard .toggle").forEach((b) => b.classList.toggle("active", (b.dataset.hard === "1") === !!c.hard));
     $("#lobby-nb").max = max;
     $("#lobby-nb").value = c.nb;
     $("#lobby-nb-value").textContent = c.nb;
@@ -818,6 +928,11 @@ const Online = (() => {
   $$("#lobby-time .toggle").forEach((b) => b.onclick = () => {
     if (!st) return;
     st.conf.time = Number(b.dataset.time);
+    broadcastLobby();
+  });
+  $$("#lobby-hard .toggle").forEach((b) => b.onclick = () => {
+    if (!st) return;
+    st.conf.hard = b.dataset.hard === "1";
     broadcastLobby();
   });
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quiz Culture G</title>
-  <link rel="stylesheet" href="css/style.css?v=202611060913" />
+  <link rel="stylesheet" href="css/style.css?v=202611060940" />
 </head>
 <body>
   <main class="app">
@@ -63,6 +63,13 @@
           <button class="toggle" data-time="60">60 s</button>
         </div>
 
+        <h2>Difficulté</h2>
+        <div class="toggle-group" id="hard-group">
+          <button class="toggle active" data-hard="0">🙂 Facile (4 choix)</button>
+          <button class="toggle" data-hard="1">✍️ Difficile (j'écris)</button>
+        </div>
+        <p class="hint hard-hint">En difficile, tu écris ta réponse. Le jeu propose une correction (juste / approximatif / faux) et c'est toi — ou l'hôte en ligne — qui valides.</p>
+
         </div>
 
         <button id="start-btn" class="btn-primary">Lancer la partie ▶</button>
@@ -103,6 +110,12 @@
               <button class="toggle" data-time="20">20 s</button>
               <button class="toggle" data-time="30">30 s</button>
               <button class="toggle" data-time="60">60 s</button>
+            </div>
+          </div>
+          <div class="field">Difficulté
+            <div class="toggle-group" id="lobby-hard">
+              <button class="toggle" data-hard="0">🙂 Facile (4 choix)</button>
+              <button class="toggle" data-hard="1">✍️ Difficile (j'écris)</button>
             </div>
           </div>
         </div>
@@ -151,6 +164,11 @@
         <div id="q-choices" class="choices"></div>
         <p id="q-feedback" class="feedback"></p>
         <button id="validate-btn" class="btn-primary hidden">✔ Valider ma réponse</button>
+        <div id="hard-zone" class="hard-zone hidden">
+          <textarea id="hard-input" rows="3" maxlength="300" placeholder="Écris ta réponse ici… (Entrée pour valider)"></textarea>
+          <button id="hard-submit" class="btn-primary">✔ Valider ma réponse</button>
+        </div>
+        <div id="judge-zone" class="judge-zone hidden"></div>
         <div id="q-explain" class="explain hidden"></div>
         <p id="q-wait" class="hint"></p>
         <div id="q-live" class="live-scores"></div>
@@ -190,31 +208,32 @@
 
   </main>
 
-  <script src="js/questions.js?v=202611060913"></script>
-  <script src="js/themes/cejm/setup.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch01.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch02.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch03.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch04.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch05.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch06.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch07.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch08.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch09.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch10.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch11.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch12.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch13.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch14.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch15.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch16.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch17.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch18.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch19.js?v=202611060913"></script>
-  <script src="js/themes/cejm/ch20.js?v=202611060913"></script>
-  <script src="js/themes/cejm/build.js?v=202611060913"></script>
-  <script src="js/lib/mqtt.min.js?v=202611060913"></script>
-  <script src="js/game.js?v=202611060913"></script>
-  <script src="js/online.js?v=202611060913"></script>
+  <script src="js/questions.js?v=202611060940"></script>
+  <script src="js/themes/cejm/setup.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch01.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch02.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch03.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch04.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch05.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch06.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch07.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch08.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch09.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch10.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch11.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch12.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch13.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch14.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch15.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch16.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch17.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch18.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch19.js?v=202611060940"></script>
+  <script src="js/themes/cejm/ch20.js?v=202611060940"></script>
+  <script src="js/themes/cejm/build.js?v=202611060940"></script>
+  <script src="js/lib/mqtt.min.js?v=202611060940"></script>
+  <script src="js/game.js?v=202611060940"></script>
+  <script src="js/hard.js?v=202611060940"></script>
+  <script src="js/online.js?v=202611060940"></script>
 </body>
 </html>

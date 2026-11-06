@@ -31,6 +31,7 @@
   chapters.forEach((c) => {
     THEMES["cejm-ch" + String(c.num).padStart(2, "0")] = {
       group: c.annee === 1 ? "CEJM – Chapitres BTS1" : "CEJM – Chapitres BTS2",
+      selectable: true, // peut être coché dans « Mes chapitres »
       name: `Ch. ${c.num} : ${c.title}`,
       icon: MATIERES[c.matiere].icon,
       questions: c.questions,

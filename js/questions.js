@@ -7,6 +7,7 @@
 const THEMES = {
   culture: {
     group: "Général",
+    selectable: true, // peut être coché dans « Mes chapitres »
     name: "Culture générale",
     icon: "🌍",
     questions: [

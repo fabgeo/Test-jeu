@@ -14,6 +14,7 @@ const settings = {
   mode: "solo",
   theme: Object.keys(THEMES)[0],
   nbQuestions: 10,
+  nbWanted: 10, // nombre choisi par le joueur (nbQuestions est limité au nombre de questions du thème)
   time: 20,
   players: ["Joueur 1", "Joueur 2"],
 };
@@ -61,7 +62,86 @@ function themeGroups() {
   return groups;
 }
 
-const openGroups = new Set(["Général", "CEJM – Révisions globales"]);
+const openGroups = new Set(["Général", "🎯 Sélection personnalisée", "CEJM – Révisions globales"]);
+
+// ---------- « Mes chapitres » : thème composé des chapitres cochés ----------
+const CUSTOM_KEY = "custom";
+const LS_CUSTOM = "quiz-custom-selection";
+let customSel = new Set();
+try { customSel = new Set((JSON.parse(localStorage.getItem(LS_CUSTOM)) || []).filter((k) => THEMES[k] && THEMES[k].selectable)); } catch {}
+
+const selectableThemes = () => Object.entries(THEMES).filter(([k, t]) => t.selectable);
+
+function updateCustomTheme() {
+  const keys = selectableThemes().map(([k]) => k).filter((k) => customSel.has(k));
+  const t = THEMES[CUSTOM_KEY];
+  t.questions = keys.flatMap((k) => THEMES[k].questions);
+  const nums = keys.map((k) => (k.match(/ch(\d+)$/) || [])[1]).filter(Boolean).map(Number);
+  const others = keys.filter((k) => !/ch\d+$/.test(k)).map((k) => THEMES[k].name);
+  t.name = keys.length
+    ? "Mes chapitres : " + [...(nums.length ? ["ch. " + nums.join(", ")] : []), ...others].join(" + ")
+    : "Mes chapitres (à choisir)";
+  try { localStorage.setItem(LS_CUSTOM, JSON.stringify(keys)); } catch {}
+}
+
+// Ajoute le thème « Mes chapitres » juste après « Général »
+(() => {
+  const entries = Object.entries(THEMES);
+  entries.forEach(([k]) => delete THEMES[k]);
+  const custom = { group: "🎯 Sélection personnalisée", name: "Mes chapitres", icon: "🎯", questions: [] };
+  let added = false;
+  entries.forEach(([k, t], i) => {
+    if (!added && t.group !== "Général") { THEMES[CUSTOM_KEY] = custom; added = true; }
+    THEMES[k] = t;
+  });
+  if (!added) THEMES[CUSTOM_KEY] = custom;
+  updateCustomTheme();
+})();
+
+// Liste de cases à cocher (utilisée à l'accueil et dans la salle d'attente en ligne)
+function renderChapterPicker(container, onChange) {
+  const groups = new Map();
+  selectableThemes().forEach(([k, t]) => {
+    if (!groups.has(t.group)) groups.set(t.group, []);
+    groups.get(t.group).push([k, t]);
+  });
+  container.innerHTML =
+    `<div class="cp-title">🎯 Coche les chapitres à réviser</div>
+     <div class="cp-actions">
+       <button type="button" data-act="all">Tout cocher</button>
+       ${[...groups.keys()].map((g) => `<button type="button" data-act="group" data-group="${escapeHtml(g)}">${escapeHtml(g.replace("CEJM – Chapitres ", "Tout "))}</button>`).join("")}
+       <button type="button" data-act="none">Tout décocher</button>
+     </div>` +
+    [...groups].map(([g, items]) =>
+      `<div class="cp-group"><h4>${escapeHtml(g)}</h4><div class="cp-list">` +
+      items.map(([k, t]) =>
+        `<label class="cp-item"><input type="checkbox" value="${k}" ${customSel.has(k) ? "checked" : ""}>${escapeHtml(t.name)}<span>${t.questions.length}</span></label>`).join("") +
+      `</div></div>`).join("") +
+    `<div class="cp-count">${customSel.size ? `${customSel.size} chapitre(s) coché(s) · ${THEMES[CUSTOM_KEY].questions.length} questions` : "Aucun chapitre coché"}</div>`;
+
+  const changed = () => { updateCustomTheme(); onChange(); };
+  container.querySelectorAll("input[type=checkbox]").forEach((cb) => cb.onchange = () => {
+    if (cb.checked) customSel.add(cb.value); else customSel.delete(cb.value);
+    changed();
+  });
+  container.querySelectorAll(".cp-actions button").forEach((btn) => btn.onclick = () => {
+    const act = btn.dataset.act;
+    if (act === "all") selectableThemes().forEach(([k]) => customSel.add(k));
+    if (act === "none") customSel.clear();
+    if (act === "group") {
+      const keys = (groups.get(btn.dataset.group) || []).map(([k]) => k);
+      const allOn = keys.every((k) => customSel.has(k));
+      keys.forEach((k) => (allOn ? customSel.delete(k) : customSel.add(k)));
+    }
+    changed();
+  });
+}
+
+function renderSetupPicker() {
+  const box = $("#custom-picker");
+  box.classList.toggle("hidden", settings.theme !== CUSTOM_KEY);
+  if (settings.theme === CUSTOM_KEY) renderChapterPicker(box, () => { $("#setup-msg").textContent = ""; renderThemes(); updateRange(); });
+}
 
 function renderThemes() {
   const list = $("#themes-list");
@@ -79,7 +159,7 @@ function renderThemes() {
       const b = document.createElement("button");
       b.className = "theme" + (key === settings.theme ? " active" : "");
       b.innerHTML = `<span class="t-icon">${t.icon || "📚"}</span><strong>${escapeHtml(t.name)}</strong><br><span class="t-count">${t.questions.length} questions</span>`;
-      b.onclick = () => { settings.theme = key; renderThemes(); updateRange(); };
+      b.onclick = () => { settings.theme = key; renderThemes(); updateRange(); $("#setup-msg").textContent = ""; };
       grid.appendChild(b);
     });
     det.appendChild(grid);
@@ -88,11 +168,12 @@ function renderThemes() {
 }
 
 function updateRange() {
-  const max = THEMES[settings.theme].questions.length;
+  renderSetupPicker();
+  const max = Math.max(1, THEMES[settings.theme].questions.length);
   const range = $("#nb-questions");
   range.max = max;
   range.min = Math.min(5, max);
-  if (settings.nbQuestions > max) settings.nbQuestions = max;
+  settings.nbQuestions = Math.min(settings.nbWanted, max);
   range.value = settings.nbQuestions;
   $("#nb-questions-value").textContent = settings.nbQuestions;
 }
@@ -132,7 +213,7 @@ function setupListeners() {
   });
 
   $("#nb-questions").oninput = (e) => {
-    settings.nbQuestions = Number(e.target.value);
+    settings.nbQuestions = settings.nbWanted = Number(e.target.value);
     $("#nb-questions-value").textContent = settings.nbQuestions;
   };
 
@@ -145,7 +226,11 @@ function setupListeners() {
 
   $("#pause-btn").onclick = () => (Online.active ? Online.togglePause() : togglePauseLocal());
   $("#resume-btn").onclick = () => (Online.active ? Online.togglePause() : togglePauseLocal());
-  $("#start-btn").onclick = () => (settings.mode === "online" ? Online.host() : startGame());
+  $("#start-btn").onclick = () => {
+    if (!THEMES[settings.theme].questions.length) { $("#setup-msg").textContent = "Coche au moins un chapitre dans « Mes chapitres »."; return; }
+    $("#setup-msg").textContent = "";
+    settings.mode === "online" ? Online.host() : startGame();
+  };
   $("#turn-ready").onclick = showQuestion;
   $("#next-btn").onclick = () => (Online.active ? Online.next() : nextTurn());
   $("#replay-btn").onclick = () => (Online.active ? Online.backToLobby() : startGame());
@@ -179,7 +264,7 @@ function revealAnswer({ answer, picked, pts, correctText, explain }) {
   const buttons = $$("#q-choices .choice");
   buttons.forEach((b, i) => {
     b.disabled = true;
-    b.classList.remove("picked", "dim");
+    b.classList.remove("picked", "dim", "unpicked");
     if (i === answer) b.classList.add("good");
     else if (i === picked) b.classList.add("bad");
     else b.classList.add("dim");
@@ -230,6 +315,11 @@ function buildQuestions(themeKey, n) {
 
 // ---------- Déroulement de la partie ----------
 function startGame() {
+  if (!THEMES[settings.theme].questions.length) {
+    $("#setup-msg").textContent = "Coche au moins un chapitre dans « Mes chapitres ».";
+    return;
+  }
+  $("#setup-msg").textContent = "";
   const names = (settings.mode === "solo" ? settings.players.slice(0, 1) : settings.players)
     .map((n, i) => n.trim() || "Joueur " + (i + 1));
 

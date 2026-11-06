@@ -213,3 +213,17 @@ select {
 .pause-overlay .btn-primary { max-width: 260px; margin: 16px auto 0; }
 
 .net-status { text-align: center; font-weight: 600; color: #c7d2fe; }
+
+/* ---------- Mes chapitres (sélection personnalisée) ---------- */
+.custom-picker { margin-top: 10px; padding: 12px; border-radius: 12px; border: 2px solid var(--primary); background: #1e1b4b88; text-align: left; }
+.cp-title { font-weight: 800; margin-bottom: 8px; }
+.cp-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.cp-actions button { padding: 6px 10px; border-radius: 8px; background: var(--bg2); border: 1px solid var(--border); font-size: .85rem; font-weight: 600; }
+.cp-group h4 { font-size: .85rem; color: var(--muted); margin: 10px 0 6px; }
+.cp-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 10px; }
+.cp-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: .9rem; }
+.cp-item:hover { background: var(--bg2); }
+.cp-item input { width: 18px; height: 18px; accent-color: var(--primary); flex-shrink: 0; }
+.cp-item span { color: var(--muted); font-size: .8rem; margin-left: auto; }
+.cp-count { margin-top: 8px; font-weight: 700; color: #c7d2fe; }
+.choice.unpicked { opacity: .55; }

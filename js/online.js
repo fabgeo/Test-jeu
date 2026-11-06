@@ -126,10 +126,11 @@ const Online = (() => {
     const code = resume ? resume.code : genCode();
     st = resume || {
       code, phase: "lobby", qi: 0, questions: [], answers: {}, paused: false, broker: 0,
-      conf: { theme: settings.theme, nb: settings.nbQuestions, time: settings.time },
+      conf: { theme: settings.theme, nb: settings.nbQuestions, nbWanted: settings.nbWanted, time: settings.time },
       players: [{ id: "host", name: myName(), score: 0, correct: 0 }],
     };
     st.timer = null;
+    st.soonTimer = null;
     if (resume) st.players.forEach((p) => { if (p.id !== "host") p.lastSeen = 0; }); // absents tant qu'ils ne se manifestent pas
 
     $("#lobby-code").textContent = code;
@@ -202,7 +203,7 @@ const Online = (() => {
 
   function persistHost() {
     if (!st) return;
-    const { timer, ...save } = st;
+    const { timer, soonTimer, ...save } = st;
     lsSet(LS_HOST, { st: save, at: Date.now() });
   }
 
@@ -235,7 +236,11 @@ const Online = (() => {
       .sort((a, b) => b.score - a.score);
   }
 
+  // Nombre de questions réel : celui choisi, limité au nombre de questions du thème
+  const effNb = () => Math.max(1, Math.min(st.conf.nbWanted || st.conf.nb, (THEMES[st.conf.theme] || { questions: [] }).questions.length || 1));
+
   function lobbyMsg() {
+    st.conf.nb = effNb();
     const t = THEMES[st.conf.theme] || THEMES[Object.keys(THEMES)[0]];
     return {
       t: "lobby", code: st.code, players: presenceList(),
@@ -321,7 +326,12 @@ const Online = (() => {
 
   function startOnline() {
     if (!st || st.phase !== "lobby") return;
-    st.questions = buildQuestions(st.conf.theme, st.conf.nb);
+    if (!THEMES[st.conf.theme] || !THEMES[st.conf.theme].questions.length) {
+      $("#lobby-start").disabled = false;
+      $("#lobby-status").textContent = "⚠️ Coche au moins un chapitre dans « Mes chapitres ».";
+      return;
+    }
+    st.questions = buildQuestions(st.conf.theme, effNb());
     st.players = st.players.filter((p) => !p.left);
     st.players.forEach((p) => { p.score = 0; p.correct = 0; });
     askQuestion(0);
@@ -354,6 +364,7 @@ const Online = (() => {
       st.pausedAt = now;
       st.remaining = st.deadline - now;
       clearTimeout(st.timer);
+      clearTimeout(st.soonTimer); st.soonTimer = null;
       broadcast({ t: "pause" });
     } else {
       st.paused = false;
@@ -365,22 +376,29 @@ const Online = (() => {
     persistHost();
   };
 
+  // Un joueur peut changer de réponse tant qu'elle n'est pas révélée (on garde la dernière)
   function onAnswer(id, qi, choice, ms) {
-    if (!st || st.phase !== "question" || qi !== st.qi || st.answers[id]) return;
+    if (!st || st.phase !== "question" || qi !== st.qi) return;
     if (!st.players.some((p) => p.id === id && !p.left)) return;
+    const first = !st.answers[id];
     st.answers[id] = { choice: Number(choice), ms: Math.max(0, Number(ms) || 0) };
-    broadcast({ t: "progress", count: Object.keys(st.answers).length, total: activePlayers().length });
+    if (first) broadcast({ t: "progress", count: Object.keys(st.answers).length, total: activePlayers().length });
     hostTick();
   }
 
+  // Quand tout le monde a répondu : encore 3 s pour changer d'avis, puis on révèle
+  const LAST_CHANCE_MS = 3000;
   function checkAllAnswered() {
     const active = activePlayers();
-    if (active.length && active.every((p) => st.answers[p.id])) reveal();
+    if (!active.length || !active.every((p) => st.answers[p.id]) || st.soonTimer) return;
+    st.soonTimer = setTimeout(() => { st.soonTimer = null; reveal(); }, LAST_CHANCE_MS);
+    broadcast({ t: "soon", ms: LAST_CHANCE_MS });
   }
 
   function reveal() {
     if (!st || st.phase !== "question") return;
     clearTimeout(st.timer);
+    clearTimeout(st.soonTimer); st.soonTimer = null;
     st.phase = "reveal";
     st.paused = false;
     const q = st.questions[st.qi];
@@ -596,6 +614,10 @@ const Online = (() => {
 
       case "question": showOnlineQuestion(m); break;
 
+      case "soon":
+        if (view && view.phase === "question") $("#q-wait").textContent = `✅ Tout le monde a répondu — réponse dans ${Math.round(m.ms / 1000)} s (tu peux encore changer d'avis)`;
+        break;
+
       case "progress":
         if (view && view.phase === "question") $("#q-wait").textContent = `${m.count} / ${m.total} joueur(s) présent(s) ont répondu`;
         break;
@@ -659,12 +681,10 @@ const Online = (() => {
     const tick = () => {
       if (drawTimer(view.start, view.time) <= 0) {
         clearInterval(localTimer);
-        if (!view.answered) {
-          view.answered = true;
-          $$("#q-choices .choice").forEach((x) => (x.disabled = true));
-          $("#q-feedback").textContent = "⏰ Temps écoulé !";
-          $("#q-feedback").className = "feedback bad";
-        }
+        view.closed = true; // plus possible de répondre ni de changer
+        $$("#q-choices .choice").forEach((x) => (x.disabled = true));
+        $("#q-feedback").textContent = view.answered ? "⏰ Temps écoulé — ta réponse est enregistrée" : "⏰ Temps écoulé !";
+        $("#q-feedback").className = view.answered ? "feedback" : "feedback bad";
       }
     };
     tick();
@@ -672,7 +692,7 @@ const Online = (() => {
   }
 
   function showOnlineQuestion(m) {
-    view = { phase: "question", qi: m.qi, start: Date.now() - (m.elapsed || 0), time: m.time, answered: false, paused: false };
+    view = { phase: "question", qi: m.qi, start: Date.now() - (m.elapsed || 0), time: m.time, answered: false, paused: false, closed: false, choice: -1 };
     const mine = me(m.players);
 
     $("#q-player").textContent = "👤 " + mine.name;
@@ -694,12 +714,12 @@ const Online = (() => {
     box.innerHTML = "";
     m.choices.forEach((c, i) => {
       const b = makeChoiceButton(c, i, () => {
-        if (view.answered || view.paused) return;
+        if (view.closed || view.paused || view.phase !== "question" || view.choice === i) return;
         view.answered = true;
         view.choice = i;
-        $$("#q-choices .choice").forEach((x) => { x.disabled = true; if (x !== b) x.classList.add("dim"); });
-        b.classList.add("picked");
-        $("#q-feedback").textContent = "Réponse envoyée ✔ — attends les autres…";
+        $$("#q-choices .choice").forEach((x, j) => { x.classList.toggle("picked", j === i); x.classList.toggle("unpicked", j !== i); });
+        $("#q-feedback").textContent = "Réponse envoyée ✔ — tu peux encore changer d'avis";
+        $("#q-feedback").className = "feedback";
         sendAnswer(i, Date.now() - view.start);
         if (isHost && view.phase === "question") showSkip(); // (la réponse a pu être révélée aussitôt)
       });
@@ -780,8 +800,11 @@ const Online = (() => {
       `<optgroup label="${escapeHtml(group)}">` + items.map(([k, t]) =>
         `<option value="${k}" ${k === c.theme ? "selected" : ""}>${t.icon || "📚"} ${escapeHtml(t.name)} (${t.questions.length})</option>`).join("") +
       `</optgroup>`).join("");
-    const max = THEMES[c.theme].questions.length;
-    if (c.nb > max) c.nb = max;
+    const picker = $("#lobby-custom-picker");
+    picker.classList.toggle("hidden", c.theme !== CUSTOM_KEY);
+    if (c.theme === CUSTOM_KEY) renderChapterPicker(picker, () => { if (st) broadcastLobby(); });
+    const max = Math.max(1, THEMES[c.theme].questions.length);
+    c.nb = Math.min(c.nbWanted || c.nb, max);
     $("#lobby-nb").max = max;
     $("#lobby-nb").value = c.nb;
     $("#lobby-nb-value").textContent = c.nb;
@@ -789,7 +812,7 @@ const Online = (() => {
   }
 
   $("#lobby-theme").onchange = (e) => { if (!st) return; st.conf.theme = e.target.value; broadcastLobby(); };
-  $("#lobby-nb").oninput = (e) => { if (st) { st.conf.nb = Number(e.target.value); $("#lobby-nb-value").textContent = st.conf.nb; } };
+  $("#lobby-nb").oninput = (e) => { if (st) { st.conf.nb = st.conf.nbWanted = Number(e.target.value); $("#lobby-nb-value").textContent = st.conf.nb; } };
   $("#lobby-nb").onchange = () => { if (st) broadcastLobby(); };
   $$("#lobby-time .toggle").forEach((b) => b.onclick = () => {
     if (!st) return;

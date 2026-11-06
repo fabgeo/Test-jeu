@@ -6,6 +6,7 @@
 
 const THEMES = {
   culture: {
+    group: "Général",
     name: "Culture générale",
     icon: "🌍",
     questions: [

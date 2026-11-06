@@ -449,8 +449,10 @@ const Online = (() => {
   // Réglages modifiables par l'hôte dans la salle d'attente
   function renderLobbySettings() {
     const c = st.conf;
-    $("#lobby-theme").innerHTML = Object.entries(THEMES).map(([k, t]) =>
-      `<option value="${k}" ${k === c.theme ? "selected" : ""}>${t.icon || "📚"} ${escapeHtml(t.name)} (${t.questions.length})</option>`).join("");
+    $("#lobby-theme").innerHTML = [...themeGroups()].map(([group, items]) =>
+      `<optgroup label="${escapeHtml(group)}">` + items.map(([k, t]) =>
+        `<option value="${k}" ${k === c.theme ? "selected" : ""}>${t.icon || "📚"} ${escapeHtml(t.name)} (${t.questions.length})</option>`).join("") +
+      `</optgroup>`).join("");
     const max = THEMES[c.theme].questions.length;
     if (c.nb > max) c.nb = max;
     $("#lobby-nb").max = max;

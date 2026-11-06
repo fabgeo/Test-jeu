@@ -50,15 +50,40 @@ function saveBoard(board) {
 }
 
 // ---------- Écran de réglages ----------
+// Regroupe les thèmes par catégorie (propriété "group"), dans l'ordre d'apparition
+function themeGroups() {
+  const groups = new Map();
+  Object.entries(THEMES).forEach(([key, t]) => {
+    const g = t.group || "Autres";
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push([key, t]);
+  });
+  return groups;
+}
+
+const openGroups = new Set(["Général", "CEJM – Révisions globales"]);
+
 function renderThemes() {
   const list = $("#themes-list");
   list.innerHTML = "";
-  Object.entries(THEMES).forEach(([key, t]) => {
-    const b = document.createElement("button");
-    b.className = "theme" + (key === settings.theme ? " active" : "");
-    b.innerHTML = `<span class="t-icon">${t.icon || "📚"}</span><strong>${escapeHtml(t.name)}</strong><br><span class="t-count">${t.questions.length} questions</span>`;
-    b.onclick = () => { settings.theme = key; renderThemes(); updateRange(); };
-    list.appendChild(b);
+  themeGroups().forEach((items, group) => {
+    const hasActive = items.some(([k]) => k === settings.theme);
+    const det = document.createElement("details");
+    det.className = "theme-group";
+    det.open = openGroups.has(group) || hasActive;
+    det.ontoggle = () => { if (det.open) openGroups.add(group); else openGroups.delete(group); };
+    det.innerHTML = `<summary>${escapeHtml(group)} <span class="t-count">(${items.length})</span></summary>`;
+    const grid = document.createElement("div");
+    grid.className = "themes";
+    items.forEach(([key, t]) => {
+      const b = document.createElement("button");
+      b.className = "theme" + (key === settings.theme ? " active" : "");
+      b.innerHTML = `<span class="t-icon">${t.icon || "📚"}</span><strong>${escapeHtml(t.name)}</strong><br><span class="t-count">${t.questions.length} questions</span>`;
+      b.onclick = () => { settings.theme = key; renderThemes(); updateRange(); };
+      grid.appendChild(b);
+    });
+    det.appendChild(grid);
+    list.appendChild(det);
   });
 }
 

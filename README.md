@@ -9,16 +9,14 @@ Jeu de questions à 4 réponses, jouable dans le navigateur.
 - **100 points** par bonne réponse + jusqu'à **50 points de bonus** de rapidité
 - **Podium**, résultats de la partie et **classement général** (sauvegardé dans le navigateur)
 
-## Ajouter un thème
-Thèmes disponibles : Culture générale (`js/questions.js`), CEJM – Fiche 1 (`js/themes/cejm.js`).
+## Thèmes
+- **Culture générale** : `js/questions.js`
+- **CEJM (BTS)** : un fichier par chapitre dans `js/themes/cejm/ch01.js` … `ch20.js`.
+  Les thèmes « Tout le programme », « BTS1 », « BTS2 », « Économie », « Droit » et « Management » sont construits automatiquement (`_build.js`).
 
-Pour un nouveau thème, crée un fichier dans `js/themes/` (et ajoute-le dans `index.html`) ou ajoute une entrée dans `THEMES` :
+## Ajouter des questions
+Dans le fichier du chapitre, ajoute une entrée dans `questions` :
 ```js
-monTheme: {
-  name: "Mon cours",
-  icon: "📚",
-  questions: [
-    { q: "La question ?", choices: ["A", "B", "C", "D"], answer: 0 } // answer = index de la bonne réponse
-  ]
-}
+{ q: "La question ?", choices: ["Bonne réponse", "B", "C", "D"], answer: 0, explain: "Explication affichée en cas d'erreur" }
 ```
+La position de la bonne réponse (A, B, C ou D) est tirée au hasard et équilibrée à chaque partie.

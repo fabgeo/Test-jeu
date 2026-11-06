@@ -177,3 +177,12 @@ select {
 .lobby-settings h3 { margin-top: 0; }
 .field { display: block; margin: 10px 0; font-weight: 600; }
 .field select, .field .range-row, .field .toggle-group { margin-top: 6px; width: 100%; }
+
+/* Thèmes regroupés par catégorie */
+.theme-group { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 12px; background: #0f172a66; }
+.theme-group summary { cursor: pointer; padding: 10px 14px; font-weight: 700; list-style: none; }
+.theme-group summary::-webkit-details-marker { display: none; }
+.theme-group summary::before { content: "▸ "; color: var(--muted); }
+.theme-group[open] summary::before { content: "▾ "; }
+.theme-group .themes { padding: 0 10px 10px; }
+.theme strong { font-size: .92rem; }

@@ -12,7 +12,7 @@ Jeu de questions à 4 réponses, jouable dans le navigateur.
 ## Thèmes
 - **Culture générale** : `js/questions.js`
 - **CEJM (BTS)** : un fichier par chapitre dans `js/themes/cejm/ch01.js` … `ch20.js`.
-  Les thèmes « Tout le programme », « BTS1 », « BTS2 », « Économie », « Droit » et « Management » sont construits automatiquement (`_build.js`).
+  Les thèmes « Tout le programme », « BTS1 », « BTS2 », « Économie », « Droit » et « Management » sont construits automatiquement (`build.js`).
 
 ## Ajouter des questions
 Dans le fichier du chapitre, ajoute une entrée dans `questions` :

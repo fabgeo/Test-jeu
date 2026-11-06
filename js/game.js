@@ -137,6 +137,42 @@ function updateModeUI() {
   $("#start-btn").textContent = online ? "Créer une salle en ligne 🌐" : "Lancer la partie ▶";
 }
 
+// ---------- Affichage commun des réponses ----------
+function makeChoiceButton(text, i, onPick) {
+  const b = document.createElement("button");
+  b.className = "choice c" + i;
+  b.innerHTML = `<span class="letter">${"ABCD"[i]}</span><span>${escapeHtml(text)}</span>`;
+  b.onclick = () => onPick(i);
+  return b;
+}
+
+// Montre la bonne réponse (✔), la mauvaise choisie (✖), grise les autres,
+// et affiche le message + l'explication si c'est raté.
+function revealAnswer({ answer, picked, pts, correctText, explain }) {
+  const buttons = $$("#q-choices .choice");
+  buttons.forEach((b, i) => {
+    b.disabled = true;
+    b.classList.remove("picked", "dim");
+    if (i === answer) b.classList.add("good");
+    else if (i === picked) b.classList.add("bad");
+    else b.classList.add("dim");
+  });
+
+  const fb = $("#q-feedback");
+  const ex = $("#q-explain");
+  if (picked === answer) {
+    fb.textContent = `✅ Bonne réponse ! +${pts} pts`;
+    fb.className = "feedback big good";
+    ex.classList.add("hidden");
+  } else {
+    fb.textContent = picked < 0 ? "⏰ Temps écoulé !" : "❌ Mauvaise réponse";
+    fb.className = "feedback big bad";
+    ex.innerHTML = `<strong>La bonne réponse était : ${escapeHtml(correctText)}</strong>` +
+      (explain ? `<br>💡 ${escapeHtml(explain)}` : "");
+    ex.classList.remove("hidden");
+  }
+}
+
 // ---------- Déroulement de la partie ----------
 function startGame() {
   const names = (settings.mode === "solo" ? settings.players.slice(0, 1) : settings.players)
@@ -147,7 +183,7 @@ function startGame() {
     .map((q) => {
       // on mélange aussi l'ordre des réponses
       const order = shuffle([0, 1, 2, 3]);
-      return { q: q.q, choices: order.map((i) => q.choices[i]), answer: order.indexOf(q.answer) };
+      return { q: q.q, choices: order.map((i) => q.choices[i]), answer: order.indexOf(q.answer), explain: q.explain || "" };
     });
 
   game = {
@@ -185,17 +221,12 @@ function showQuestion() {
   $("#q-feedback").className = "feedback";
   $("#q-wait").textContent = "";
   $("#q-live").innerHTML = "";
+  $("#q-explain").classList.add("hidden");
   $("#next-btn").classList.add("hidden");
 
   const box = $("#q-choices");
   box.innerHTML = "";
-  q.choices.forEach((c, i) => {
-    const b = document.createElement("button");
-    b.className = "choice";
-    b.innerHTML = `<span class="letter">${"ABCD"[i]}</span><span>${escapeHtml(c)}</span>`;
-    b.onclick = () => answer(i);
-    box.appendChild(b);
-  });
+  q.choices.forEach((c, i) => box.appendChild(makeChoiceButton(c, i, answer)));
 
   showScreen("screen-question");
   startTimer();
@@ -225,26 +256,17 @@ function answer(choice) {
 
   const q = game.questions[game.qIndex];
   const p = game.players[game.pIndex];
-  const buttons = $$("#q-choices .choice");
-  buttons.forEach((b) => (b.disabled = true));
-  buttons[q.answer].classList.add("good");
-
-  const fb = $("#q-feedback");
+  let pts = 0;
   if (choice === q.answer) {
-    let pts = BASE_POINTS;
+    pts = BASE_POINTS;
     if (settings.time) {
       const ratio = Math.max(0, 1 - (Date.now() - game.startTime) / (settings.time * 1000));
       pts += Math.round(MAX_SPEED_BONUS * ratio);
     }
     p.score += pts;
     p.correct++;
-    fb.textContent = `✅ Bonne réponse ! +${pts} pts`;
-    fb.classList.add("good");
-  } else {
-    if (choice >= 0) buttons[choice].classList.add("bad");
-    fb.textContent = choice < 0 ? "⏰ Temps écoulé !" : "❌ Mauvaise réponse";
-    fb.classList.add("bad");
   }
+  revealAnswer({ answer: q.answer, picked: choice, pts, correctText: q.choices[q.answer], explain: q.explain });
   $("#q-score").textContent = p.score + " pts";
   $("#next-btn").classList.remove("hidden");
   $("#next-btn").focus();

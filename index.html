@@ -56,6 +56,7 @@
           <button class="toggle" data-time="10">10 s</button>
           <button class="toggle active" data-time="20">20 s</button>
           <button class="toggle" data-time="30">30 s</button>
+          <button class="toggle" data-time="60">60 s</button>
         </div>
 
         </div>
@@ -79,6 +80,27 @@
           </div>
         </div>
         <p id="lobby-info" class="hint"></p>
+        <div id="lobby-settings" class="lobby-settings hidden">
+          <h3>⚙️ Réglages de la partie (toi seul peux les changer)</h3>
+          <label class="field">Thème
+            <select id="lobby-theme"></select>
+          </label>
+          <label class="field">Nombre de questions
+            <div class="range-row">
+              <input type="range" id="lobby-nb" min="1" max="40" value="10" />
+              <span id="lobby-nb-value" class="badge">10</span>
+            </div>
+          </label>
+          <div class="field">Temps par question
+            <div class="toggle-group" id="lobby-time">
+              <button class="toggle" data-time="0">Illimité</button>
+              <button class="toggle" data-time="10">10 s</button>
+              <button class="toggle" data-time="20">20 s</button>
+              <button class="toggle" data-time="30">30 s</button>
+              <button class="toggle" data-time="60">60 s</button>
+            </div>
+          </div>
+        </div>
         <h3>Joueurs connectés</h3>
         <ul id="lobby-players" class="lobby-players"></ul>
         <p id="lobby-status" class="hint"></p>
@@ -111,6 +133,7 @@
         <h2 id="q-text"></h2>
         <div id="q-choices" class="choices"></div>
         <p id="q-feedback" class="feedback"></p>
+        <div id="q-explain" class="explain hidden"></div>
         <p id="q-wait" class="hint"></p>
         <div id="q-live" class="live-scores"></div>
         <button id="next-btn" class="btn-primary hidden">Suivant ➜</button>

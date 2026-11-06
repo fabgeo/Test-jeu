@@ -169,7 +169,7 @@ const Online = (() => {
     if (!st || st.phase !== "lobby") return;
     st.questions = shuffle(THEMES[st.conf.theme].questions).slice(0, st.conf.nb).map((q) => {
       const order = shuffle([0, 1, 2, 3]);
-      return { q: q.q, choices: order.map((i) => q.choices[i]), answer: order.indexOf(q.answer) };
+      return { q: q.q, choices: order.map((i) => q.choices[i]), answer: order.indexOf(q.answer), explain: q.explain || "" };
     });
     st.players = st.players.filter((p) => !p.left);
     st.players.forEach((p) => { p.score = 0; p.correct = 0; });
@@ -217,7 +217,7 @@ const Online = (() => {
       }
       results[p.id] = { choice: a ? a.choice : -1, pts };
     });
-    broadcast({ t: "reveal", qi: st.qi, answer: q.answer, results, players: publicPlayers(), last: st.qi >= st.questions.length - 1 });
+    broadcast({ t: "reveal", qi: st.qi, answer: q.answer, correctText: q.choices[q.answer], explain: q.explain, results, players: publicPlayers(), last: st.qi >= st.questions.length - 1 });
   }
 
   function endOnline() {
@@ -316,6 +316,8 @@ const Online = (() => {
         $("#lobby-info").textContent = m.info;
         $("#lobby-players").innerHTML = m.players.map((n, i) => `<li>${i === 0 ? "👑 " : ""}${escapeHtml(n)}</li>`).join("");
         $("#lobby-start").classList.toggle("hidden", !isHost);
+        $("#lobby-settings").classList.toggle("hidden", !isHost);
+        if (isHost) renderLobbySettings();
         $("#lobby-start").disabled = false;
         $("#lobby-status").textContent = isHost
           ? (m.players.length < 2 ? "En attente d'autres joueurs… (tu peux aussi lancer seul)" : `${m.players.length} joueurs prêts !`)
@@ -350,24 +352,22 @@ const Online = (() => {
     $("#q-feedback").className = "feedback";
     $("#q-wait").textContent = "";
     $("#q-live").innerHTML = "";
+    $("#q-explain").classList.add("hidden");
     $("#next-btn").classList.add("hidden");
 
     const box = $("#q-choices");
     box.innerHTML = "";
     m.choices.forEach((c, i) => {
-      const b = document.createElement("button");
-      b.className = "choice";
-      b.innerHTML = `<span class="letter">${"ABCD"[i]}</span><span>${escapeHtml(c)}</span>`;
-      b.onclick = () => {
+      const b = makeChoiceButton(c, i, () => {
         if (view.answered) return;
         view.answered = true;
         view.choice = i;
-        $$("#q-choices .choice").forEach((x) => (x.disabled = true));
+        $$("#q-choices .choice").forEach((x) => { x.disabled = true; if (x !== b) x.classList.add("dim"); });
         b.classList.add("picked");
-        $("#q-feedback").textContent = "Réponse envoyée ✔";
+        $("#q-feedback").textContent = "Réponse envoyée ✔ — attends les autres…";
         sendAnswer(i, Date.now() - view.start);
         if (isHost) showSkip();
-      };
+      });
       box.appendChild(b);
     });
     if (isHost && !m.time) showSkip();
@@ -407,18 +407,8 @@ const Online = (() => {
   function showReveal(m) {
     clearInterval(localTimer);
     view.phase = "reveal";
-    const buttons = $$("#q-choices .choice");
-    buttons.forEach((b) => { b.disabled = true; b.classList.remove("picked"); });
-    if (buttons[m.answer]) buttons[m.answer].classList.add("good");
-
     const r = m.results[myId] || { choice: -1, pts: 0 };
-    const fb = $("#q-feedback");
-    if (r.pts > 0) { fb.textContent = `✅ Bonne réponse ! +${r.pts} pts`; fb.className = "feedback good"; }
-    else {
-      if (r.choice >= 0 && buttons[r.choice]) buttons[r.choice].classList.add("bad");
-      fb.textContent = r.choice < 0 ? "⏰ Pas de réponse" : "❌ Mauvaise réponse";
-      fb.className = "feedback bad";
-    }
+    revealAnswer({ answer: m.answer, picked: r.choice, pts: r.pts, correctText: m.correctText, explain: m.explain });
     $("#q-score").textContent = me(m.players).score + " pts";
 
     $("#q-live").innerHTML = m.players.map((p, i) => {
@@ -458,6 +448,28 @@ const Online = (() => {
     $("#home-btn").textContent = "Quitter la salle";
     showScreen("screen-results");
   }
+
+  // Réglages modifiables par l'hôte dans la salle d'attente
+  function renderLobbySettings() {
+    const c = st.conf;
+    $("#lobby-theme").innerHTML = Object.entries(THEMES).map(([k, t]) =>
+      `<option value="${k}" ${k === c.theme ? "selected" : ""}>${t.icon || "📚"} ${escapeHtml(t.name)} (${t.questions.length})</option>`).join("");
+    const max = THEMES[c.theme].questions.length;
+    if (c.nb > max) c.nb = max;
+    $("#lobby-nb").max = max;
+    $("#lobby-nb").value = c.nb;
+    $("#lobby-nb-value").textContent = c.nb;
+    $$("#lobby-time .toggle").forEach((b) => b.classList.toggle("active", Number(b.dataset.time) === c.time));
+  }
+
+  $("#lobby-theme").onchange = (e) => { if (!st) return; st.conf.theme = e.target.value; broadcastLobby(); };
+  $("#lobby-nb").oninput = (e) => { if (st) { st.conf.nb = Number(e.target.value); $("#lobby-nb-value").textContent = st.conf.nb; } };
+  $("#lobby-nb").onchange = () => { if (st) broadcastLobby(); };
+  $$("#lobby-time .toggle").forEach((b) => b.onclick = () => {
+    if (!st) return;
+    st.conf.time = Number(b.dataset.time);
+    broadcastLobby();
+  });
 
   // ======================================================
   //  BRANCHEMENTS

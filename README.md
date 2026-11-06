@@ -10,7 +10,9 @@ Jeu de questions à 4 réponses, jouable dans le navigateur.
 - **Podium**, résultats de la partie et **classement général** (sauvegardé dans le navigateur)
 
 ## Ajouter un thème
-Ouvre `js/questions.js` et ajoute une entrée dans `THEMES` :
+Thèmes disponibles : Culture générale (`js/questions.js`), CEJM – Fiche 1 (`js/themes/cejm.js`).
+
+Pour un nouveau thème, crée un fichier dans `js/themes/` (et ajoute-le dans `index.html`) ou ajoute une entrée dans `THEMES` :
 ```js
 monTheme: {
   name: "Mon cours",

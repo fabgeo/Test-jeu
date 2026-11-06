@@ -406,10 +406,10 @@ const Online = (() => {
     if (q.hard) {
       st.phase = "judge";
       st.lastJudge = {
-        t: "judge", qi: st.qi, model: q.model, explain: q.explain,
+        t: "judge", qi: st.qi, model: q.model, alts: (q.accepted || []).slice(1), explain: q.explain,
         entries: st.players.filter((p) => !p.left || st.answers[p.id]).map((p) => {
           const a = st.answers[p.id];
-          return { id: p.id, name: p.name, text: a ? a.text : "", auto: autoGrade(a ? a.text : "", q.model) };
+          return { id: p.id, name: p.name, text: a ? a.text : "", auto: gradeAnswer(a ? a.text : "", q.accepted || [q.model]) };
         }),
       };
       broadcast(st.lastJudge);
@@ -440,14 +440,14 @@ const Online = (() => {
     const results = {};
     st.players.forEach((p) => {
       const a = st.answers[p.id];
-      const verdict = verdicts[p.id] || (a ? autoGrade(a.text, q.model) : "faux");
+      const verdict = verdicts[p.id] || (a ? gradeAnswer(a.text, q.accepted || [q.model]) : "faux");
       const pts = a ? hardPoints(verdict, a.ms, st.conf.time) : 0;
       p.score += pts;
       if (verdict === "juste" && a) p.correct++;
       results[p.id] = { verdict: a ? verdict : "faux", pts, text: a ? a.text : "" };
     });
     st.phase = "reveal";
-    st.lastReveal = { t: "reveal", hard: true, qi: st.qi, model: q.model, explain: q.explain, results, players: publicPlayers(), last: st.qi >= st.questions.length - 1 };
+    st.lastReveal = { t: "reveal", hard: true, qi: st.qi, model: q.model, alts: (q.accepted || []).slice(1), explain: q.explain, results, players: publicPlayers(), last: st.qi >= st.questions.length - 1 };
     broadcast(st.lastReveal);
     hostTick();
   }
@@ -812,7 +812,7 @@ const Online = (() => {
     const zone = $("#judge-zone");
     zone.classList.remove("hidden");
     renderJudge(zone, {
-      model: m.model, explain: m.explain, entries: m.entries, canJudge: isHost, myId,
+      model: m.model, alts: m.alts, explain: m.explain, entries: m.entries, canJudge: isHost, myId,
       title: isHost ? "Réponses des joueurs — choisis la note de chacun" : "Réponses des joueurs",
       onSubmit: (verdicts) => finishJudge(verdicts),
     });
@@ -856,7 +856,7 @@ const Online = (() => {
     const zone = $("#judge-zone");
     zone.classList.remove("hidden");
     renderJudge(zone, {
-      model: m.model, explain: m.explain, canJudge: false, myId, title: "Correction de l'hôte",
+      model: m.model, alts: m.alts, explain: m.explain, canJudge: false, myId, title: "Correction de l'hôte",
       entries: m.players.filter((p) => m.results[p.id]).map((p) => ({ id: p.id, name: p.name, text: m.results[p.id].text, auto: m.results[p.id].verdict })),
     });
     zone.querySelectorAll(".judge-auto").forEach((x) => (x.textContent = x.textContent.replace("suggestion : ", "note : ")));

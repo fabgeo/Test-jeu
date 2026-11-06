@@ -25,11 +25,20 @@ function hardPoints(verdict, ms, time) {
 function isOpenable(q) {
   return !/\b(lequel|laquelle|lesquels|lesquelles)\b|\bPAS\b|\bparmi\b|^exemples?\b/i.test(q.q);
 }
-const hardPool = (themeKey) => (THEMES[themeKey] ? THEMES[themeKey].questions.filter(isOpenable) : []);
+// Questions du mode difficile : { q, a: [réponses acceptées], explain }
+// - thèmes CEJM : questions à réponse courte (short.js), correction fiable
+// - autres thèmes : les questions à 4 choix « ouvrables », la bonne réponse sert de réponse type
+function hardPool(themeKey) {
+  const t = THEMES[themeKey];
+  if (!t) return [];
+  if (themeKey === CUSTOM_KEY) return [...customSel].filter((k) => THEMES[k]).flatMap((k) => hardPool(k));
+  if (t.short && t.short.length) return t.short;
+  return t.questions.filter(isOpenable).map((q) => ({ q: q.q, a: [q.choices[q.answer]], explain: q.explain || "" }));
+}
 
 function buildHardQuestions(themeKey, n) {
-  return shuffle(hardPool(themeKey)).slice(0, n).map((q) => ({
-    hard: true, q: q.q, model: q.choices[q.answer], explain: q.explain || "",
+  return shuffle(hardPool(themeKey)).slice(0, n).map((h) => ({
+    hard: true, q: h.q, model: h.a[0], accepted: h.a, explain: h.explain || "",
   }));
 }
 
@@ -53,10 +62,10 @@ function lev(a, b) {
   return d[a.length][b.length];
 }
 // Un mot de la réponse type est-il présent (à une petite faute près) dans la réponse du joueur ?
+// (tolérance : 1 faute pour les mots de 6 lettres et plus, 2 fautes à partir de 9 — « micro » ≠ « macro »)
 function wordFound(k, words) {
-  return words.some((w) => w === k ||
-    (k.length >= 5 && w.length >= 5 && (w.startsWith(k.slice(0, 5)) && k.startsWith(w.slice(0, 5)))) ||
-    (k.length >= 5 && lev(w, k) <= (k.length >= 8 ? 2 : 1)));
+  // la 1re lettre doit être la même : « désintermédiation » ≠ « réintermédiation »
+  return words.some((w) => w === k || (k.length >= 6 && w[0] === k[0] && lev(w, k) <= (k.length >= 9 ? 2 : 1)));
 }
 
 function autoGrade(text, model) {
@@ -82,18 +91,34 @@ function autoGrade(text, model) {
   const ratio = found.length / keys.length;
   const longest = [...keys].sort((x, y) => y.length - x.length)[0];
   const okNums = numsFound === nums.length;
-  if (okNums && (ratio >= 0.75 || (ratio >= 0.5 && found.includes(longest)))) return "juste";
+  if (okNums && (ratio >= 0.75 || (keys.length >= 3 && ratio >= 0.5 && found.includes(longest)))) return "juste";
   if (ratio >= 0.3 || found.length >= 1 && keys.length <= 2) return "approx";
   return "faux";
 }
 
+// Correction d'une réponse courte : comparée à chacune des réponses acceptées
+function gradeAnswer(text, accepted) {
+  const t = normTxt(text);
+  if (!t) return "faux";
+  let best = "faux";
+  for (const a of accepted) {
+    const n = normTxt(a);
+    if (n && (t === n || (" " + t + " ").includes(" " + n + " "))) return "juste"; // présente telle quelle (sigles courts : SA, IS…)
+    const g = autoGrade(text, a);
+    if (g === "juste") return "juste";
+    if (g === "approx") best = "approx";
+  }
+  return best;
+}
+
 // ---------- Écran de correction ----------
 // entries : [{ id, name, text, auto }] ; canJudge : peut attribuer les points ; onSubmit(verdicts)
-function renderJudge(container, { model, explain, entries, canJudge, onSubmit, title, myId }) {
+function renderJudge(container, { model, alts, explain, entries, canJudge, onSubmit, title, myId }) {
   const verdicts = {};
   entries.forEach((e) => (verdicts[e.id] = e.auto));
   container.innerHTML =
     `<div class="judge-model"><div class="judge-title">📘 Réponse type</div><div class="judge-model-text">${escapeHtml(model)}</div>` +
+    (alts && alts.length ? `<div class="judge-explain">Accepté aussi : ${alts.map(escapeHtml).join(" · ")}</div>` : "") +
     (explain ? `<div class="judge-explain">💡 ${escapeHtml(explain)}</div>` : "") + `</div>` +
     `<div class="judge-title">${escapeHtml(title || (canJudge ? "À toi de corriger" : "Les réponses"))}</div>` +
     entries.map((e) => `

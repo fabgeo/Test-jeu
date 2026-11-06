@@ -423,8 +423,8 @@ function submitHardLocal(text) {
   const zone = $("#judge-zone");
   zone.classList.remove("hidden");
   renderJudge(zone, {
-    model: q.model, explain: q.explain, canJudge: true, title: "Ta réponse — choisis ta note",
-    entries: [{ id: "me", name: p.name, text, auto: autoGrade(text, q.model) }],
+    model: q.model, alts: (q.accepted || []).slice(1), explain: q.explain, canJudge: true, title: "Ta réponse — choisis ta note",
+    entries: [{ id: "me", name: p.name, text, auto: gradeAnswer(text, q.accepted || [q.model]) }],
     onSubmit: (v) => {
       const verdict = v.me;
       const pts = hardPoints(verdict, ms, settings.time);

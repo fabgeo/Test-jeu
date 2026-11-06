@@ -13,10 +13,13 @@
   };
   const chapters = [...CEJM_CHAPTERS].sort((a, b) => a.num - b.num);
   const all = (list) => list.flatMap((c) => c.questions);
+  // Questions à réponse courte (mode difficile) : [question, [réponses acceptées], explication]
+  const shortOf = (c) => ((typeof CEJM_SHORT !== "undefined" && CEJM_SHORT[c.num]) || []).map(([q, a, explain]) => ({ q, a, explain }));
+  const allShort = (list) => list.flatMap(shortOf);
 
-  THEMES["cejm-tout"] = { group: "CEJM – Révisions globales", name: "Tout le programme", icon: "🎓", questions: all(chapters) };
-  THEMES["cejm-bts1"] = { group: "CEJM – Révisions globales", name: "BTS1 (ch. 1 à 13)", icon: "1️⃣", questions: all(chapters.filter((c) => c.annee === 1)) };
-  THEMES["cejm-bts2"] = { group: "CEJM – Révisions globales", name: "BTS2 (ch. 14 à 20)", icon: "2️⃣", questions: all(chapters.filter((c) => c.annee === 2)) };
+  THEMES["cejm-tout"] = { group: "CEJM – Révisions globales", name: "Tout le programme", icon: "🎓", questions: all(chapters), short: allShort(chapters) };
+  THEMES["cejm-bts1"] = { group: "CEJM – Révisions globales", name: "BTS1 (ch. 1 à 13)", icon: "1️⃣", questions: all(chapters.filter((c) => c.annee === 1)), short: allShort(chapters.filter((c) => c.annee === 1)) };
+  THEMES["cejm-bts2"] = { group: "CEJM – Révisions globales", name: "BTS2 (ch. 14 à 20)", icon: "2️⃣", questions: all(chapters.filter((c) => c.annee === 2)), short: allShort(chapters.filter((c) => c.annee === 2)) };
 
   Object.entries(MATIERES).forEach(([key, m]) => {
     const list = chapters.filter((c) => c.matiere === key);
@@ -25,6 +28,7 @@
       name: `${m.name} (ch. ${list.map((c) => c.num).join(", ")})`,
       icon: m.icon,
       questions: all(list),
+      short: allShort(list),
     };
   });
 
@@ -35,6 +39,7 @@
       name: `Ch. ${c.num} : ${c.title}`,
       icon: MATIERES[c.matiere].icon,
       questions: c.questions,
+      short: shortOf(c),
     };
   });
 })();

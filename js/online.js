@@ -1,12 +1,26 @@
 // =========================================================
 //  MODE EN LIGNE (chacun sur son appareil)
-//  Connexion directe entre navigateurs via PeerJS (WebRTC).
+//  Les messages passent par un serveur relais public gratuit (MQTT sur WebSocket) :
+//  ça marche quel que soit le réseau (4G, box, wifi d'école…).
 //  L'hôte crée une salle avec un code ; il gère les questions, les scores,
 //  la présence des joueurs et la pause.
+//  Sujets (topics) d'une salle :
+//    <racine>/<CODE>/host    : messages des joueurs vers l'hôte
+//    <racine>/<CODE>/all     : messages de l'hôte vers tout le monde
+//    <racine>/<CODE>/p/<id>  : messages de l'hôte vers un joueur précis
 // =========================================================
 
 const Online = (() => {
-  const PREFIX = "quizcg-v1-";
+  const ROOT = "quiz-revisions-fabgeo/v2/";
+  // Serveurs relais publics (le dernier caractère du code de salle indique lequel est utilisé)
+  const BROKERS = [
+    "wss://broker.emqx.io:8084/mqtt",
+    "wss://broker.hivemq.com:8884/mqtt",
+    "wss://test.mosquitto.org:8081/mqtt",
+  ];
+  const BROKER_TAG = "ABC"; // A = 1er serveur, B = 2e, C = 3e
+  const CONNECT_TIMEOUT_MS = 7000;
+  const HOST_SILENCE_MS = 45000; // sans nouvelles de l'hôte pendant 45 s => partie terminée
   const MAX_ONLINE = 12;
   const GRACE_MS = 1000;       // marge réseau après la fin du chrono
   const PING_MS = 2000;        // les invités donnent signe de vie toutes les 2 s
@@ -17,14 +31,25 @@ const Online = (() => {
     absent: ["🔴", "Absent"],
   };
 
-  // Pour les tests : ?peerhost=localhost&peerport=9000 (serveur PeerJS local)
+  // Pour les tests : ?mqtt=ws://127.0.0.1:8888 (serveur relais local)
   const params = new URLSearchParams(location.search);
-  const peerOpts = params.get("peerhost")
-    ? { host: params.get("peerhost"), port: Number(params.get("peerport") || 9000), path: "/", secure: false }
-    : {};
+  const brokerUrl = (code) => params.get("mqtt") || BROKERS[Math.max(0, BROKER_TAG.indexOf(code[4]))] || BROKERS[0];
+  const topic = (code, sub) => ROOT + code + "/" + sub;
+  const randId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+  function mqttConnect(url, clientId, will) {
+    return mqtt.connect(url, {
+      clientId, clean: true, keepalive: 20, reconnectPeriod: 2000,
+      connectTimeout: CONNECT_TIMEOUT_MS, resubscribe: true,
+      will: { topic: will.topic, payload: JSON.stringify(will.msg), qos: 1, retain: false },
+    });
+  }
+  function publish(t, msg, qos = 1) {
+    if (mq) mq.publish(t, JSON.stringify(msg), { qos });
+  }
 
   const api = { active: false };
-  let peer = null;
+  let mq = null;            // client MQTT (connexion au serveur relais)
   let isHost = false;
   let myId = null;
   let hostConn = null;      // (invité) connexion vers l'hôte
@@ -34,6 +59,8 @@ const Online = (() => {
   let localTimer = null;
   let presenceTimer = null; // (hôte) diffusion de la présence
   let pingTimer = null;     // (invité) signe de vie
+  let hostWatch = null;     // (invité) surveille que l'hôte est toujours là
+  let lastHostMsg = 0;
 
   // ---------- Utilitaires ----------
   const genCode = () => {
@@ -50,11 +77,11 @@ const Online = (() => {
     clearInterval(localTimer);
     clearInterval(presenceTimer);
     clearInterval(pingTimer);
+    clearInterval(hostWatch);
     api.active = false;
-    conns.forEach((c) => { try { c.close(); } catch {} });
     conns.clear();
-    if (peer) { try { peer.destroy(); } catch {} }
-    peer = null; hostConn = null; st = null; view = null; myId = null;
+    if (mq) { const c = mq; setTimeout(() => { try { c.end(true); } catch {} }, 300); } // laisse partir le dernier message
+    mq = null; hostConn = null; st = null; view = null; myId = null;
     showPauseButton(false);
     $("#q-players").classList.add("hidden");
   }
@@ -68,7 +95,7 @@ const Online = (() => {
   function shareLink(code) {
     const u = new URL(location.href);
     u.hash = "";
-    [...u.searchParams.keys()].forEach((k) => { if (!k.startsWith("peer")) u.searchParams.delete(k); });
+    [...u.searchParams.keys()].forEach((k) => { if (k !== "mqtt") u.searchParams.delete(k); });
     u.searchParams.set("salle", code);
     return u.toString();
   }
@@ -76,11 +103,11 @@ const Online = (() => {
   // ======================================================
   //  CÔTÉ HÔTE
   // ======================================================
-  api.host = () => {
+  api.host = (brokerIndex = 0) => {
     setError("");
     cleanup();
     isHost = true;
-    const code = genCode();
+    const code = genCode().slice(0, 4) + BROKER_TAG[brokerIndex];
     st = {
       code, phase: "lobby", qi: 0, questions: [], answers: {}, timer: null, paused: false,
       conf: { theme: settings.theme, nb: settings.nbQuestions, time: settings.time },
@@ -95,26 +122,37 @@ const Online = (() => {
     $("#lobby-players").innerHTML = "";
     showScreen("screen-lobby");
 
-    peer = new Peer(PREFIX + code, peerOpts);
-    peer.on("open", () => {
-      api.active = true;
-      $("#lobby-share").classList.remove("hidden");
-      $("#lobby-link").value = shareLink(code);
-      broadcastLobby();
-      presenceTimer = setInterval(hostTick, 1500);
+    const client = mq = mqttConnect(brokerUrl(code), "qh-" + randId(), { topic: topic(code, "all"), msg: { t: "hostgone" } });
+    // Si ce serveur ne répond pas, on essaie le suivant
+    const giveUp = setTimeout(() => {
+      if (api.active || mq !== client) return;
+      if (!params.get("mqtt") && brokerIndex + 1 < BROKERS.length) api.host(brokerIndex + 1);
+      else fail("Impossible de créer la salle : serveur injoignable. Vérifie ta connexion internet.");
+    }, CONNECT_TIMEOUT_MS + 1000);
+
+    client.on("connect", () => {
+      client.subscribe(topic(code, "host"), { qos: 1 }, (err) => {
+        if (err || mq !== client || api.active) return;
+        clearTimeout(giveUp);
+        api.active = true;
+        $("#lobby-share").classList.remove("hidden");
+        $("#lobby-link").value = shareLink(code);
+        broadcastLobby();
+        presenceTimer = setInterval(hostTick, 1500);
+      });
     });
-    peer.on("connection", (conn) => {
-      conn.on("data", (d) => onHostData(conn, d));
-      conn.on("close", () => removePlayer(conn.peer));
-      conn.on("error", () => removePlayer(conn.peer));
-    });
-    peer.on("disconnected", () => { if (peer && !peer.destroyed) peer.reconnect(); });
-    peer.on("error", (e) => {
-      if (e.type === "unavailable-id") return api.host(); // code déjà pris : on en tire un autre
-      if (e.type === "peer-unavailable") return;
-      if (!api.active) fail("Impossible de créer la salle (" + e.type + "). Vérifie ta connexion internet.");
+    client.on("message", (t, payload) => {
+      if (mq !== client) return;
+      let d; try { d = JSON.parse(payload.toString()); } catch { return; }
+      if (!d || typeof d.from !== "string") return;
+      onHostData(conns.get(d.from) || makeConn(d.from), d);
     });
   };
+
+  // Objet « connexion » vers un joueur (messages privés via son sujet)
+  function makeConn(id) {
+    return { peer: id, open: true, send: (msg) => publish(topic(st.code, "p/" + id), msg), close() { this.open = false; } };
+  }
 
   function sendTo(id, msg) {
     if (id === "host") return handle(msg);
@@ -123,7 +161,7 @@ const Online = (() => {
   }
 
   function broadcast(msg) {
-    conns.forEach((c) => { if (c.open) c.send(msg); });
+    publish(topic(st.code, "all"), msg, msg.t === "presence" ? 0 : 1);
     handle(msg); // l'hôte s'affiche aussi le message
   }
 
@@ -156,20 +194,25 @@ const Online = (() => {
       .sort((a, b) => b.score - a.score);
   }
 
-  function broadcastLobby() {
+  function lobbyMsg() {
     const t = THEMES[st.conf.theme];
-    broadcast({
+    return {
       t: "lobby", code: st.code,
       players: presenceList(),
       info: `${t.icon || "📚"} ${t.name} · ${st.conf.nb} questions · ${st.conf.time ? st.conf.time + " s par question" : "temps illimité"}`,
-    });
+    };
   }
+  function broadcastLobby() { broadcast(lobbyMsg()); }
 
   function onHostData(conn, d) {
     if (!d || typeof d !== "object" || !st) return;
     const id = conn.peer;
     const known = st.players.find((p) => p.id === id);
-    if (known) known.lastSeen = Date.now();
+    if (known) {
+      known.lastSeen = Date.now();
+      // un joueur marqué parti qui donne de nouveau signe de vie (ex. téléphone sorti de veille)
+      if (known.left && d.t !== "bye") { known.left = false; conns.set(id, makeConn(id)); }
+    }
 
     if (d.t === "ping") {
       if (known) known.visible = !!d.visible;
@@ -194,14 +237,16 @@ const Online = (() => {
         return;
       }
 
+      // message reçu deux fois : le joueur est déjà là
+      if (known) { conns.set(id, conn); conn.send({ t: "welcome", you: id, code: st.code }); return resync(id); }
       if (st.phase !== "lobby") return refuse(conn, "La partie a déjà commencé. Attends la prochaine !");
       if (st.players.filter((p) => !p.left).length >= MAX_ONLINE) return refuse(conn, "La salle est pleine.");
       const base = name; let n = 2;
       while (st.players.some((p) => p.name === name)) name = `${base} ${n++}`;
       conns.set(id, conn);
-      st.players = st.players.filter((p) => p.id !== id);
       st.players.push({ id, name, score: 0, correct: 0, lastSeen: Date.now(), visible: true });
       conn.send({ t: "welcome", you: id, code: st.code });
+      conn.send(lobbyMsg()); // en privé, pour être sûr qu'il arrive après « welcome »
       broadcastLobby();
     }
 
@@ -210,7 +255,7 @@ const Online = (() => {
 
   // Renvoie l'état actuel de la partie à un joueur qui revient
   function resync(id) {
-    if (st.phase === "lobby") return broadcastLobby();
+    if (st.phase === "lobby") { sendTo(id, lobbyMsg()); return broadcastLobby(); }
     if (st.phase === "end") return sendTo(id, st.lastEnd);
     const now = st.paused ? st.pausedAt : Date.now();
     sendTo(id, { ...st.lastQuestion, players: publicPlayers(), elapsed: now - st.qStart - st.pausedTotal });
@@ -360,29 +405,50 @@ const Online = (() => {
     $("#join-btn").textContent = "…";
     const restoreBtn = () => { $("#join-btn").disabled = false; $("#join-btn").textContent = "Rejoindre"; };
 
-    peer = new Peer(undefined, peerOpts);
-    const timeout = setTimeout(() => { if (!api.active) { restoreBtn(); fail("Salle introuvable ou connexion impossible. Vérifie le code."); } }, 15000);
+    const me = randId();
+    const client = mq = mqttConnect(brokerUrl(code), "qp-" + me, { topic: topic(code, "host"), msg: { t: "bye", from: me } });
+    hostConn = { open: false, send: (msg) => publish(topic(code, "host"), { ...msg, from: me }, msg.t === "ping" ? 0 : 1) };
+    let connectedOnce = false;
+    const timeout = setTimeout(() => {
+      if (api.active || mq !== client) return;
+      restoreBtn();
+      fail(connectedOnce
+        ? "Salle introuvable : vérifie le code, et que la partie a bien été créée."
+        : "Connexion au serveur impossible. Vérifie ta connexion internet.");
+    }, 12000);
 
-    peer.on("open", () => {
-      hostConn = peer.connect(PREFIX + code, { reliable: true });
-      hostConn.on("open", () => hostConn.send({ t: "join", name: myName() }));
-      hostConn.on("data", (d) => {
-        if (d && d.t === "welcome") {
-          clearTimeout(timeout); restoreBtn();
-          clearInterval(pingTimer);
-          pingTimer = setInterval(sendPing, PING_MS);
-        }
-        handle(d);
+    client.on("connect", () => {
+      connectedOnce = true;
+      client.subscribe([topic(code, "all"), topic(code, "p/" + me)], { qos: 1 }, (err) => {
+        if (err || mq !== client) return;
+        hostConn.open = true;
+        if (!api.active) hostConn.send({ t: "join", name: myName() });
       });
-      hostConn.on("close", onHostLost);
     });
-    peer.on("disconnected", () => { if (peer && !peer.destroyed) peer.reconnect(); });
-    peer.on("error", (e) => {
-      if (api.active) return;
-      clearTimeout(timeout); restoreBtn();
-      fail(e.type === "peer-unavailable" ? "Salle introuvable. Vérifie le code." : "Erreur de connexion (" + e.type + ").");
+    client.on("message", (t, payload) => {
+      if (mq !== client) return;
+      let d; try { d = JSON.parse(payload.toString()); } catch { return; }
+      if (!d || typeof d !== "object") return;
+      const isPrivate = t.endsWith("/p/" + me);
+      if (!api.active && !isPrivate) return; // pas encore accepté dans la salle
+      lastHostMsg = Date.now();
+      if (d.t === "hostgone") return hostDisconnected();
+      if (d.t === "hostleft") return onHostLost();
+      if (d.t === "welcome") {
+        clearTimeout(timeout); restoreBtn();
+        clearInterval(pingTimer); pingTimer = setInterval(sendPing, PING_MS);
+        clearInterval(hostWatch); hostWatch = setInterval(() => { if (Date.now() - lastHostMsg > HOST_SILENCE_MS) onHostLost(); }, 3000);
+      }
+      handle(d);
     });
   };
+
+  // L'hôte a perdu sa connexion (ex. téléphone en veille) : on attend son retour
+  function hostDisconnected() {
+    const msg = "⚠️ L'hôte s'est déconnecté… en attente de son retour.";
+    if (view && view.phase === "lobby") $("#lobby-status").textContent = msg;
+    else $("#q-wait").textContent = msg;
+  }
 
   function sendPing() {
     if (hostConn && hostConn.open) hostConn.send({ t: "ping", visible: !document.hidden });
@@ -408,6 +474,7 @@ const Online = (() => {
 
   api.leave = () => {
     if (!isHost && hostConn && hostConn.open) { try { hostConn.send({ t: "bye" }); } catch {} }
+    if (isHost && st) publish(topic(st.code, "all"), { t: "hostleft" });
     cleanup(); // les invités voient la connexion se fermer
     showScreen("screen-setup");
   };

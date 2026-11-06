@@ -4,7 +4,7 @@ Jeu de questions à 4 réponses, jouable dans le navigateur.
 
 - Mode **solo**
 - Mode **même appareil** (2 à 8 joueurs, chacun son tour)
-- Mode **en ligne** 🌐 : chacun sur son ordi/téléphone. Un joueur crée une salle (code à 5 lettres + lien à partager), les autres la rejoignent. Connexion directe entre navigateurs (PeerJS / WebRTC), aucun serveur à installer.
+- Mode **en ligne** 🌐 : chacun sur son ordi/téléphone. Un joueur crée une salle (code à 5 lettres + lien à partager), les autres la rejoignent. Les messages passent par un serveur relais public gratuit (MQTT sur WebSocket : EMQX, puis HiveMQ ou Mosquitto en secours), ce qui marche sur tous les réseaux. Aucun serveur à installer.
 - Choix du **nombre de questions** et du **temps par question**
 - **100 points** par bonne réponse + jusqu'à **50 points de bonus** de rapidité
 - **Podium**, résultats de la partie et **classement général** (sauvegardé dans le navigateur)

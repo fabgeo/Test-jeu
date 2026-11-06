@@ -143,6 +143,8 @@ function setupListeners() {
     }
   };
 
+  $("#pause-btn").onclick = () => (Online.active ? Online.togglePause() : togglePauseLocal());
+  $("#resume-btn").onclick = () => (Online.active ? Online.togglePause() : togglePauseLocal());
   $("#start-btn").onclick = () => (settings.mode === "online" ? Online.host() : startGame());
   $("#turn-ready").onclick = showQuestion;
   $("#next-btn").onclick = () => (Online.active ? Online.next() : nextTurn());
@@ -269,6 +271,7 @@ function showQuestion() {
   $("#q-wait").textContent = "";
   $("#q-live").innerHTML = "";
   $("#q-explain").classList.add("hidden");
+  $("#q-players").classList.add("hidden");
   $("#next-btn").classList.add("hidden");
 
   const box = $("#q-choices");
@@ -279,27 +282,68 @@ function showQuestion() {
   startTimer();
 }
 
+// ---------- Pause (commun) ----------
+// paused : en pause ou non ; canResume : afficher le bouton "Reprendre" ; msg : texte sous "Pause"
+function setPauseUI(paused, canResume, msg) {
+  $("#pause-overlay").classList.toggle("hidden", !paused);
+  $("#resume-btn").classList.toggle("hidden", !canResume);
+  $("#pause-msg").textContent = msg || "";
+  const btn = $("#pause-btn");
+  btn.textContent = paused ? "▶ Reprendre" : "⏸ Pause";
+  btn.classList.toggle("paused", paused);
+}
+function showPauseButton(visible) {
+  $("#pause-btn").classList.toggle("hidden", !visible);
+  if (!visible) setPauseUI(false);
+}
+
+function drawTimer(startTime, time) {
+  const left = 1 - (Date.now() - startTime) / (time * 1000);
+  const bar = $("#timer-bar");
+  bar.style.width = Math.max(0, left) * 100 + "%";
+  bar.style.background = left < 0.25 ? "var(--bad)" : left < 0.5 ? "var(--warn)" : "var(--good)";
+  return left;
+}
+
 function startTimer() {
   clearInterval(timerId);
-  const wrap = $("#timer-wrap");
-  const bar = $("#timer-bar");
   game.startTime = Date.now();
-  if (!settings.time) { wrap.classList.add("hidden"); return; }
-  wrap.classList.remove("hidden");
-  bar.style.width = "100%";
-  bar.style.background = "var(--good)";
+  game.paused = false;
+  setPauseUI(false);
+  if (!settings.time) { $("#timer-wrap").classList.add("hidden"); showPauseButton(false); return; }
+  $("#timer-wrap").classList.remove("hidden");
+  showPauseButton(true);
+  runTimer();
+}
+
+function runTimer() {
+  clearInterval(timerId);
+  drawTimer(game.startTime, settings.time);
   timerId = setInterval(() => {
-    const left = 1 - (Date.now() - game.startTime) / (settings.time * 1000);
-    bar.style.width = Math.max(0, left) * 100 + "%";
-    bar.style.background = left < 0.25 ? "var(--bad)" : left < 0.5 ? "var(--warn)" : "var(--good)";
-    if (left <= 0) answer(-1);
+    if (drawTimer(game.startTime, settings.time) <= 0) answer(-1);
   }, 100);
 }
 
+function togglePauseLocal() {
+  if (!game || game.answered || !settings.time) return;
+  if (!game.paused) {
+    game.paused = true;
+    game.pausedAt = Date.now();
+    clearInterval(timerId);
+    setPauseUI(true, true, "Le chrono est arrêté. La question est cachée.");
+  } else {
+    game.startTime += Date.now() - game.pausedAt; // le temps de pause ne compte pas
+    game.paused = false;
+    setPauseUI(false);
+    runTimer();
+  }
+}
+
 function answer(choice) {
-  if (game.answered) return;
+  if (game.answered || game.paused) return;
   game.answered = true;
   clearInterval(timerId);
+  showPauseButton(false);
 
   const q = game.questions[game.qIndex];
   const p = game.players[game.pIndex];

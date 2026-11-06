@@ -101,7 +101,8 @@
             </div>
           </div>
         </div>
-        <h3>Joueurs connectés</h3>
+        <h3>Joueurs</h3>
+        <p class="hint legend">🟢 Présent · 🟡 Inactif (appli en arrière-plan) · 🔴 Absent (déconnecté)</p>
         <ul id="lobby-players" class="lobby-players"></ul>
         <p id="lobby-status" class="hint"></p>
         <button id="lobby-start" class="btn-primary hidden">Démarrer la partie ▶</button>
@@ -128,8 +129,19 @@
       </div>
       <div class="progress"><div id="progress-bar"></div></div>
       <div class="timer" id="timer-wrap"><div id="timer-bar"></div></div>
+      <div class="q-tools">
+        <div id="q-players" class="presence hidden"></div>
+        <button id="pause-btn" class="btn-pause hidden">⏸ Pause</button>
+      </div>
 
-      <div class="card">
+      <div class="card q-card">
+        <div id="pause-overlay" class="pause-overlay hidden">
+          <div>
+            <div class="pause-title">⏸ Pause</div>
+            <p id="pause-msg" class="hint"></p>
+            <button id="resume-btn" class="btn-primary">▶ Reprendre</button>
+          </div>
+        </div>
         <h2 id="q-text"></h2>
         <div id="q-choices" class="choices"></div>
         <p id="q-feedback" class="feedback"></p>

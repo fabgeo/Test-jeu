@@ -186,3 +186,28 @@ select {
 .theme-group[open] summary::before { content: "▾ "; }
 .theme-group .themes { padding: 0 10px 10px; }
 .theme strong { font-size: .92rem; }
+
+/* ---------- Présence des joueurs ---------- */
+.legend { font-size: .8rem; margin-top: -4px; }
+.lobby-players li { display: flex; align-items: center; gap: 8px; }
+.lobby-players .st { font-size: .8rem; color: var(--muted); font-weight: 500; }
+.lobby-players li.st-absent { opacity: .6; border-style: dashed; }
+.lobby-players li.st-away { border-color: var(--warn); }
+.lobby-players li.st-present { border-color: #22c55e88; }
+.kick { background: var(--bad); color: #fff; border-radius: 50%; width: 22px; height: 22px; font-size: .75rem; line-height: 22px; padding: 0; }
+.q-tools { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.presence { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.presence span { font-size: .8rem; background: var(--bg2); border: 1px solid var(--border); padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.presence span.st-absent { opacity: .55; text-decoration: line-through; }
+.presence span.done { border-color: var(--good); }
+
+/* ---------- Pause ---------- */
+.btn-pause { margin-left: auto; padding: 8px 14px; border-radius: 10px; background: var(--warn); color: #1c1917; font-weight: 800; }
+.btn-pause.paused { background: var(--good); color: #052e16; }
+.q-card { position: relative; }
+.pause-overlay {
+  position: absolute; inset: 0; z-index: 5; border-radius: 18px;
+  background: #111827; display: grid; place-items: center; text-align: center; padding: 20px;
+}
+.pause-title { font-size: 2.4rem; font-weight: 900; }
+.pause-overlay .btn-primary { max-width: 260px; margin: 16px auto 0; }

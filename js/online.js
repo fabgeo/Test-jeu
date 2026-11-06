@@ -167,10 +167,7 @@ const Online = (() => {
 
   function startOnline() {
     if (!st || st.phase !== "lobby") return;
-    st.questions = shuffle(THEMES[st.conf.theme].questions).slice(0, st.conf.nb).map((q) => {
-      const order = shuffle([0, 1, 2, 3]);
-      return { q: q.q, choices: order.map((i) => q.choices[i]), answer: order.indexOf(q.answer), explain: q.explain || "" };
-    });
+    st.questions = buildQuestions(st.conf.theme, st.conf.nb);
     st.players = st.players.filter((p) => !p.left);
     st.players.forEach((p) => { p.score = 0; p.correct = 0; });
     askQuestion(0);

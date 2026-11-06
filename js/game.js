@@ -173,18 +173,40 @@ function revealAnswer({ answer, picked, pts, correctText, explain }) {
   }
 }
 
+// ---------- Tirage des questions ----------
+// Positions des bonnes réponses équilibrées : sur une partie, A, B, C et D
+// sont la bonne réponse à peu près le même nombre de fois (écart max : 1),
+// dans un ordre aléatoire, et jamais plus de 2 fois la même lettre d'affilée.
+function balancedPositions(n) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    // chaque lettre apparaît floor(n/4) fois, le reste est réparti au hasard sur des lettres différentes
+    const pos = [];
+    for (let i = 0; i < Math.floor(n / 4); i++) pos.push(0, 1, 2, 3);
+    pos.push(...shuffle([0, 1, 2, 3]).slice(0, n % 4));
+    const order = shuffle(pos);
+    if (order.every((p, i) => i < 2 || !(p === order[i - 1] && p === order[i - 2]))) return order;
+  }
+  return shuffle(Array.from({ length: n }, (_, i) => i % 4));
+}
+
+function buildQuestions(themeKey, n) {
+  const picked = shuffle(THEMES[themeKey].questions).slice(0, n);
+  const positions = balancedPositions(picked.length);
+  return picked.map((q, k) => {
+    const target = positions[k];
+    const wrong = shuffle(q.choices.filter((_, i) => i !== q.answer));
+    const choices = [];
+    for (let i = 0; i < 4; i++) choices.push(i === target ? q.choices[q.answer] : wrong.shift());
+    return { q: q.q, choices, answer: target, explain: q.explain || "" };
+  });
+}
+
 // ---------- Déroulement de la partie ----------
 function startGame() {
   const names = (settings.mode === "solo" ? settings.players.slice(0, 1) : settings.players)
     .map((n, i) => n.trim() || "Joueur " + (i + 1));
 
-  const questions = shuffle(THEMES[settings.theme].questions)
-    .slice(0, settings.nbQuestions)
-    .map((q) => {
-      // on mélange aussi l'ordre des réponses
-      const order = shuffle([0, 1, 2, 3]);
-      return { q: q.q, choices: order.map((i) => q.choices[i]), answer: order.indexOf(q.answer), explain: q.explain || "" };
-    });
+  const questions = buildQuestions(settings.theme, settings.nbQuestions);
 
   game = {
     questions,

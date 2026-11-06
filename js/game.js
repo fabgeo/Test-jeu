@@ -445,6 +445,7 @@ function submitHardLocal(text) {
 // paused : en pause ou non ; canResume : afficher le bouton "Reprendre" ; msg : texte sous "Pause"
 function setPauseUI(paused, canResume, msg) {
   $("#pause-overlay").classList.toggle("hidden", !paused);
+  if (!paused) { $("#pause-panel").classList.add("hidden"); $(".q-card").classList.remove("has-panel"); }
   $("#resume-btn").classList.toggle("hidden", !canResume);
   $("#pause-msg").textContent = msg || "";
   const btn = $("#pause-btn");

@@ -23,6 +23,8 @@
   const parse = (buf) => { try { const s = buf.toString(); return s ? JSON.parse(s) : null; } catch { return null; } };
 
   let privKey = null;
+  const ver = ((document.querySelector('script[src*="admin.js"]') || {}).src || "").split("v=")[1] || "?";
+  $("#admin-version").textContent = "Version de la page : " + ver;
   const clients = [];          // un client MQTT par relais
   const serverState = BROKERS.map(() => "connexion…");
   const rooms = new Map();     // code -> infos de la salle
@@ -45,10 +47,18 @@
     setInterval(render, 1000);
     render();
   }
+  // Saisie tolérante : espaces autour et majuscules ignorés (« compta », « COMPTA », « Compta » …)
   $("#login-btn").onclick = async () => {
+    const raw = $("#pwd").value;
+    const t = raw.trim();
+    const candidates = [...new Set([raw, t, t.charAt(0).toUpperCase() + t.slice(1).toLowerCase(), t.toLowerCase()])].filter(Boolean);
     $("#login-msg").textContent = "Vérification…";
-    try { await useKey(await unlock($("#pwd").value)); $("#login-msg").textContent = ""; }
-    catch { $("#login-msg").textContent = "Mot de passe incorrect."; }
+    $("#login-btn").disabled = true;
+    for (const pwd of candidates) {
+      try { const jwk = await unlock(pwd); $("#login-msg").textContent = ""; $("#login-btn").disabled = false; return useKey(jwk); } catch {}
+    }
+    $("#login-btn").disabled = false;
+    $("#login-msg").textContent = "Mot de passe incorrect.";
   };
   $("#pwd").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#login-btn").click(); });
   $("#logout").onclick = () => { try { sessionStorage.removeItem(SS_KEY); } catch {} location.reload(); };

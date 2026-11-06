@@ -504,24 +504,92 @@ const Online = (() => {
 
   // ----- Pause (hôte uniquement) -----
   api.togglePause = () => {
-    if (!isHost || !st || st.phase !== "question" || !st.conf.time) return;
+    if (!isHost || !st || st.phase !== "question") return;
     const now = Date.now();
+    const timed = !!(st.lastQuestion && st.lastQuestion.time); // chrono de la question EN COURS
     if (!st.paused) {
       st.paused = true;
       st.pausedAt = now;
-      st.remaining = st.deadline - now;
-      clearTimeout(st.timer);
+      if (timed) { st.remaining = st.deadline - now; clearTimeout(st.timer); }
       clearTimeout(st.soonTimer); st.soonTimer = null;
       broadcast({ t: "pause" });
     } else {
       st.paused = false;
       st.pausedTotal += now - st.pausedAt;
-      st.deadline = now + st.remaining;
-      st.timer = setTimeout(reveal, st.remaining);
+      if (timed) { st.deadline = now + st.remaining; st.timer = setTimeout(reveal, st.remaining); }
       broadcast({ t: "resume" });
+      hostTick();
     }
     persistHost();
   };
+
+  // ----- Panneau de l'hôte pendant la pause : joueurs (retirer) et paramètres -----
+  function renderPausePanel(full) {
+    const panel = $("#pause-panel");
+    const show = isHost && st && view && view.paused && st.phase === "question";
+    panel.classList.toggle("hidden", !show);
+    $(".q-card").classList.toggle("has-panel", !!show); // la carte s'agrandit pour tout afficher
+    if (!show) return;
+    const DOTS = { present: "🟢", away: "🟡", absent: "🔴" };
+    $("#pp-players").innerHTML = presenceList().map((p) => `
+      <li><span>${DOTS[p.status] || "⚪"} ${escapeHtml(p.name)} · ${p.score || 0} pts${p.id === "host" ? " (toi)" : ""}</span>
+        ${p.id === "host" ? "" : `<button type="button" class="pp-kick" data-kick="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}">✕ Retirer</button>`}</li>`).join("");
+    if (!full) return; // (la liste des joueurs se met à jour en continu, les réglages seulement à l'ouverture)
+    const c = st.conf;
+    const pool = playableCount(c.theme, c.hard);
+    const max = Math.max(st.questions.length, Math.min(pool, 100));
+    $("#pp-settings").innerHTML = `
+      <div class="field">Temps par question
+        <div class="toggle-group">${[0, 10, 20, 30, 60].map((t) => `<button type="button" class="toggle ${c.time === t ? "active" : ""}" data-ptime="${t}">${t ? t + " s" : "Illimité"}</button>`).join("")}</div></div>
+      <div class="field">Nombre de questions : <strong id="pp-nb-val">${st.questions.length}</strong>
+        <div class="range-row"><input type="range" id="pp-nb" min="${st.qi + 1}" max="${max}" value="${st.questions.length}" /></div></div>
+      <div class="field">Difficulté
+        <div class="toggle-group"><button type="button" class="toggle ${!c.hard ? "active" : ""}" data-phard="0">🙂 Facile (4 choix)</button><button type="button" class="toggle ${c.hard ? "active" : ""}" data-phard="1">✍️ Difficile (j'écris)</button></div></div>
+      <p class="pp-note">Thème : ${escapeHtml((THEMES[c.theme] || {}).name || c.theme)} · la question en cours n'est pas modifiée.</p>`;
+    const box = $("#pp-settings");
+    box.querySelectorAll("[data-ptime]").forEach((b) => b.onclick = () => { changeSettings({ time: Number(b.dataset.ptime) }); });
+    box.querySelectorAll("[data-phard]").forEach((b) => b.onclick = () => { changeSettings({ hard: b.dataset.phard === "1" }); });
+    const nb = $("#pp-nb");
+    nb.oninput = () => ($("#pp-nb-val").textContent = nb.value);
+    nb.onchange = () => changeSettings({ total: Number(nb.value) });
+  }
+
+  // Questions supplémentaires (sans reprendre celles déjà prévues)
+  function moreQuestions(n, hard) {
+    const used = new Set(st.questions.map((q) => q && q.q));
+    const fresh = (hard ? buildHardQuestions(st.conf.theme, 9999) : buildQuestions(st.conf.theme, 9999)).filter((q) => !used.has(q.q));
+    return fresh.slice(0, n);
+  }
+
+  function changeSettings({ time, total, hard }) {
+    if (!isHost || !st) return;
+    const c = st.conf;
+    if (time != null) c.time = time;
+    if (hard != null && hard !== !!c.hard) {
+      // les questions suivantes sont retirées dans le nouveau mode
+      c.hard = hard;
+      const keep = st.questions.slice(0, st.qi + 1);
+      const rest = st.questions.length - keep.length;
+      st.questions = keep;
+      st.questions.push(...moreQuestions(rest, hard));
+    }
+    if (total != null && total !== st.questions.length) {
+      total = Math.max(st.qi + 1, total);
+      if (total < st.questions.length) st.questions = st.questions.slice(0, total);
+      else st.questions.push(...moreQuestions(total - st.questions.length, !!c.hard));
+    }
+    c.nb = c.nbWanted = st.questions.length;
+    st.lastQuestion.total = st.questions.length;
+    broadcast({ t: "total", total: st.questions.length, qi: st.qi });
+    persistHost();
+    publishBackup();
+    renderPausePanel(true);
+  }
+
+  $("#pause-panel").addEventListener("click", (e) => {
+    const k = e.target.closest("[data-kick]");
+    if (k && confirm(`Retirer ${k.dataset.name} de la partie ?`)) { kickPlayer(k.dataset.kick, "L'hôte t'a retiré de la partie."); renderPausePanel(false); }
+  });
 
   // Un joueur peut changer de réponse tant qu'elle n'est pas révélée (on garde la dernière)
   function onAnswer(id, qi, choice, ms, text) {
@@ -881,8 +949,13 @@ const Online = (() => {
           view.paused = true;
           view.pausedAt = Date.now();
           clearInterval(localTimer);
-          setPauseUI(true, isHost, isHost ? "Le chrono est arrêté pour tout le monde. La question est cachée." : "L'hôte a mis la partie en pause. Le chrono est arrêté.");
+          setPauseUI(true, isHost, isHost ? "La partie est en pause pour tout le monde. La question est cachée." : "L'hôte a mis la partie en pause. Le chrono est arrêté.");
+          renderPausePanel(true);
         }
+        break;
+
+      case "total":
+        if (view && view.phase === "question") $("#q-progress").textContent = `Question ${(m.qi || 0) + 1} / ${m.total}`;
         break;
 
       case "resume":
@@ -890,6 +963,7 @@ const Online = (() => {
           view.start += Date.now() - view.pausedAt; // le temps de pause ne compte pas
           view.paused = false;
           setPauseUI(false);
+          renderPausePanel(false);
           if (view.time) startLocalTimer();
         }
         break;
@@ -914,10 +988,11 @@ const Online = (() => {
 
   function renderPresence(list) {
     if (!list) return;
+    if (isHost && view && view.paused) renderPausePanel(false);
     $("#lobby-players").innerHTML = list.map((p, i) => {
       const [dot, label] = PRESENCE[p.status] || PRESENCE.present;
-      const kick = isHost && p.id !== "host" && p.status === "absent"
-        ? `<button class="kick" data-id="${escapeHtml(p.id)}" title="Retirer ce joueur">✕</button>` : "";
+      const kick = isHost && p.id !== "host"
+        ? `<button class="kick" data-id="${escapeHtml(p.id)}" data-name="${escapeHtml(p.name)}" title="Retirer ce joueur">✕</button>` : "";
       return `<li class="st-${p.status}">${i === 0 ? "👑 " : ""}${escapeHtml(p.name)}${p.id === myId ? " (toi)" : ""} <span class="st">${dot} ${label}</span>${kick}</li>`;
     }).join("");
 
@@ -925,7 +1000,7 @@ const Online = (() => {
       const present = list.filter((p) => p.status === "present").length;
       const absent = list.filter((p) => p.status === "absent").length;
       $("#lobby-status").textContent = isHost
-        ? `${present} présent(s)` + (absent ? ` · ${absent} absent(s) (clique ✕ pour retirer)` : "") +
+        ? `${present} présent(s)` + (absent ? ` · ${absent} absent(s)` : "") + (list.length > 1 ? " · ✕ pour retirer un joueur" : "") +
           (list.length < 2 ? " — en attente d'autres joueurs… (tu peux aussi lancer seul)" : "")
         : "En attente que l'hôte lance la partie…";
     }
@@ -980,7 +1055,7 @@ const Online = (() => {
     $("#validate-btn").classList.add("hidden");
     $("#q-players").classList.remove("hidden");
     setPauseUI(false);
-    showPauseButton(isHost && !!m.time);
+    showPauseButton(isHost);
 
     const box = $("#q-choices");
     box.innerHTML = "";
@@ -1176,7 +1251,7 @@ const Online = (() => {
   $("#lobby-leave").onclick = api.leave;
   $("#lobby-players").addEventListener("click", (e) => {
     const k = e.target.closest(".kick");
-    if (k) api.kick(k.dataset.id);
+    if (k && confirm(`Retirer ${k.dataset.name || "ce joueur"} de la salle ?`)) api.kick(k.dataset.id);
   });
   $("#copy-link").onclick = () => {
     const input = $("#lobby-link");

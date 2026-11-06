@@ -1,0 +1,26 @@
+/* ---------- Page d'administration ---------- */
+.admin { max-width: 960px; }
+.adm-top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; }
+.adm-top .btn-link { width: auto; margin: 0; }
+.adm-servers { display: flex; gap: 8px; flex-wrap: wrap; }
+.adm-servers span { font-size: .8rem; padding: 4px 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); }
+.adm-summary { font-weight: 800; color: #c7d2fe; }
+.room { margin-bottom: 14px; }
+.room.closed { opacity: .5; }
+.room-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; }
+.room-code { font-size: 1.6rem; font-weight: 900; letter-spacing: 4px; color: #c7d2fe; }
+.room-meta { color: var(--muted); font-size: .9rem; }
+.room-state { font-weight: 700; }
+.room-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.adm-btn { padding: 6px 12px; border-radius: 8px; font-weight: 700; font-size: .85rem; background: var(--bg2); border: 1px solid var(--border); }
+.adm-btn.danger { background: #7f1d1d; border-color: var(--bad); }
+.adm-btn.warn { background: #78350f; border-color: var(--warn); }
+.adm-btn:disabled { opacity: .5; }
+.room table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: .9rem; }
+.room th, .room td { text-align: left; padding: 6px; border-bottom: 1px solid var(--border); }
+.room th { color: var(--muted); font-size: .8rem; }
+.ban-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.ban-row small { color: var(--muted); }
+.empty { color: var(--muted); text-align: center; padding: 20px; }
+.toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--good); color: #052e16; font-weight: 800; padding: 10px 16px; border-radius: 10px; z-index: 50; }
+@media (max-width: 600px) { .room .hide-sm { display: none; } }

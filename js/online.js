@@ -17,13 +17,10 @@
 
 const Online = (() => {
   const params = new URLSearchParams(location.search);
-  const ROOT = "quiz-revisions-fabgeo/v3/";
+  const ROOT = NET.ROOT; // configuration commune : js/net-config.js
   // Relais publics essayés dans l'ordre (?mqtt=ws://a,ws://b pour tester avec des relais locaux)
-  const BROKERS = params.get("mqtt") ? params.get("mqtt").split(",") : [
-    "wss://broker.emqx.io:8084/mqtt",
-    "wss://broker.hivemq.com:8884/mqtt",
-    "wss://test.mosquitto.org:8081/mqtt",
-  ];
+  const BROKERS = params.get("mqtt") ? params.get("mqtt").split(",") : NET.BROKERS;
+  const BANS_TOPIC = ROOT + "_admin/bans"; // liste des joueurs bloqués (signée par l'administrateur)
   const MAX_ONLINE = 12;
   const GRACE_MS = 1000;          // marge réseau après la fin du chrono
   const PING_MS = 2000;           // les joueurs donnent signe de vie toutes les 2 s
@@ -53,6 +50,68 @@ const Online = (() => {
   let view = null;          // affichage local
   let localTimer = null, presenceTimer = null, beatTimer = null, pingTimer = null, hostWatch = null;
   let lastHostMsg = 0, hostAwaySince = 0;
+
+  // ---------- Administration (commandes signées par l'administrateur) ----------
+  // Seule la page admin possède la clé privée ; le jeu vérifie avec la clé publique (net-config.js).
+  const LS_BANS = "quiz-online-bans";
+  let bans = (lsGet(LS_BANS) || { list: [] }).list || [];
+  let adminKeyP = null;
+  const adminKey = () => (adminKeyP = adminKeyP || crypto.subtle.importKey(
+    "jwk", NET.ADMIN_PUBLIC_JWK, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]));
+  async function verifyAdmin(msg) {
+    try {
+      if (!msg || typeof msg.p !== "string" || typeof msg.s !== "string" || !window.crypto || !crypto.subtle) return null;
+      const sig = Uint8Array.from(atob(msg.s), (ch) => ch.charCodeAt(0));
+      const ok = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, await adminKey(), sig, new TextEncoder().encode(msg.p));
+      return ok ? JSON.parse(msg.p) : null;
+    } catch { return null; }
+  }
+  const normName = (n) => String(n || "").trim().toLowerCase();
+  const isBanned = (uid, name) => bans.some((b) => (b.type === "uid" && b.value === uid) || (b.type === "name" && normName(b.value) === normName(name)));
+  const BANNED_MSG = "⛔ Tu as été bloqué(e) par l'administrateur du jeu.";
+
+  // Nouvelle liste de blocage reçue (message retenu sur le relais)
+  async function onBans(buf) {
+    const payload = await verifyAdmin(parse(buf));
+    if (!payload || !Array.isArray(payload.list)) return;
+    const prev = lsGet(LS_BANS);
+    if (prev && prev.at && payload.at < prev.at) return; // on garde la plus récente
+    bans = payload.list;
+    lsSet(LS_BANS, { list: bans, at: payload.at });
+    enforceBans();
+  }
+  function enforceBans() {
+    if (!api.active) return;
+    if (isHost && st) {
+      if (isBanned(UID, myName())) return adminClose(BANNED_MSG);
+      st.players.filter((p) => p.id !== "host" && isBanned(p.id, p.name)).forEach((p) => kickPlayer(p.id, BANNED_MSG));
+    } else if (!isHost && isBanned(UID, myName())) {
+      if (hostConn) hostConn.send({ t: "bye" });
+      lsSet(LS_GUEST, null);
+      fail(BANNED_MSG);
+    }
+  }
+
+  // Commande de l'administrateur reçue par l'hôte
+  async function onAdminCommand(d) {
+    const cmd = await verifyAdmin(d);
+    if (!cmd || !st || cmd.code !== st.code || Math.abs(Date.now() - cmd.at) > 10 * 60 * 1000) return;
+    if (cmd.cmd === "close") adminClose("🛑 La salle a été fermée par l'administrateur.");
+    if (cmd.cmd === "kick" && cmd.id) {
+      if (cmd.id === UID || cmd.id === "host") adminClose("🛑 L'administrateur a fermé ta salle."); // retirer l'hôte = fermer la salle
+      else kickPlayer(cmd.id, "L'administrateur t'a retiré de la salle.");
+    }
+    if (cmd.cmd === "notice" && cmd.text) broadcast({ t: "notice", text: String(cmd.text).slice(0, 200) });
+  }
+  function adminClose(reason) {
+    if (!st) return;
+    pub(T(st.code, "all"), { t: "hostleft", reason });
+    pub(T(st.code, "host"), null, { retain: true });
+    lsSet(LS_HOST, null);
+    cleanup();
+    showScreen("screen-setup");
+    setError(reason);
+  }
 
   // ---------- Utilitaires ----------
   const genCode = () => {
@@ -118,6 +177,7 @@ const Online = (() => {
   // ======================================================
   api.host = async (resume = null) => {
     if (!window.mqtt) return setError("Le module de connexion n'a pas chargé. Vérifie ta connexion internet.");
+    // (le blocage est vérifié avec la liste à jour reçue du relais juste après la connexion)
     setError("");
     cleanup();
     const my = session;
@@ -150,16 +210,19 @@ const Online = (() => {
     mq = c;
     st.broker = i - 1;
 
-    const announce = () => pub(T(code, "host"), { on: true, at: Date.now() }, { retain: true });
+    const announce = () => pub(T(code, "host"), { on: true, at: Date.now(), uid: UID, name: myName() }, { retain: true });
     c.on("message", (t, buf) => {
-      if (my !== session || t !== T(code, "act")) return;
+      if (my !== session) return;
+      if (t === BANS_TOPIC) return onBans(buf);
+      if (t !== T(code, "act")) return;
       const d = parse(buf);
+      if (d && d.t === "admin") return onAdminCommand(d);
       if (!d || typeof d.from !== "string") return;
       const id = d.from.slice(0, 40);
       onHostData(conns.get(id) || makeConn(id), d);
     });
-    c.on("connect", () => { if (my === session) c.subscribe(T(code, "act"), { qos: 1 }, announce); }); // après une coupure
-    c.subscribe(T(code, "act"), { qos: 1 }, (err) => {
+    c.on("connect", () => { if (my === session) c.subscribe([T(code, "act"), BANS_TOPIC], { qos: 1 }, announce); }); // après une coupure
+    c.subscribe([T(code, "act"), BANS_TOPIC], { qos: 1 }, (err) => {
       if (err || my !== session) return;
       announce();
       api.active = true;
@@ -221,12 +284,18 @@ const Online = (() => {
     return st.players.map((p) => ({
       id: p.id, name: p.name, status: statusOf(p),
       answered: st.phase === "question" && !!st.answers[p.id],
+      score: p.score || 0, uid: p.id === "host" ? UID : p.id,
     }));
   }
 
   function hostTick() {
     if (!st || !api.active) return;
-    broadcast({ t: "presence", players: presenceList() });
+    const t = THEMES[st.conf.theme];
+    broadcast({
+      t: "presence", players: presenceList(),
+      // infos pour la page d'administration
+      room: { phase: st.phase, qi: st.qi, total: st.questions.length, theme: t ? t.name : st.conf.theme, hard: !!st.conf.hard, time: st.conf.time, paused: !!st.paused, hostUid: UID },
+    });
     if (st.phase === "question" && !st.paused) checkAllAnswered(); // un absent ne bloque pas la question
     persistHost();
   }
@@ -264,6 +333,7 @@ const Online = (() => {
 
     if (d.t === "join") {
       let name = String(d.name || "Joueur").trim().slice(0, 20) || "Joueur";
+      if (isBanned(id, name)) return conn.send({ t: "refused", msg: BANNED_MSG });
       conns.set(id, conn);
 
       // Déjà dans la salle (reconnexion, rechargement de page…) : on lui renvoie l'état
@@ -318,13 +388,14 @@ const Online = (() => {
   }
 
   // L'hôte retire définitivement un joueur
-  api.kick = (id) => {
+  api.kick = (id) => kickPlayer(id, "L'hôte t'a retiré de la salle.");
+  function kickPlayer(id, msg) {
     if (!isHost || !st || id === "host") return;
-    sendTo(id, { t: "refused", msg: "L'hôte t'a retiré de la salle." });
+    sendTo(id, { t: "refused", msg });
     conns.delete(id);
     st.players = st.players.filter((p) => p.id !== id);
     if (st.phase === "lobby") broadcastLobby(); else hostTick();
-  };
+  }
 
   function startOnline() {
     if (!st || st.phase !== "lobby") return;
@@ -540,6 +611,7 @@ const Online = (() => {
 
     c.on("message", (t, buf) => {
       if (my !== session) return;
+      if (t === BANS_TOPIC) return onBans(buf);
       const d = parse(buf);
       if (t === T(code, "host")) {
         if (!d || !d.on) hostDisconnected();
@@ -550,7 +622,7 @@ const Online = (() => {
       const isPrivate = t === T(code, "p/" + UID);
       if (!api.active && !isPrivate) return; // pas encore accepté dans la salle
       lastHostMsg = Date.now();
-      if (d.t === "hostleft") return onHostLost();
+      if (d.t === "hostleft") return onHostLost(d.reason);
       if (d.t === "welcome") {
         clearTimeout(welcomeTimeout); restoreBtn(); setNet("");
         clearInterval(pingTimer); pingTimer = setInterval(sendPing, PING_MS);
@@ -561,7 +633,7 @@ const Online = (() => {
       }
       handle(d);
     });
-    const topics = [T(code, "all"), T(code, "p/" + UID), T(code, "host")];
+    const topics = [T(code, "all"), T(code, "p/" + UID), T(code, "host"), BANS_TOPIC];
     c.on("connect", () => { if (my === session) c.subscribe(topics, { qos: 1 }, hello); }); // après une coupure
     c.subscribe(topics, { qos: 1 }, hello);
   };
@@ -578,12 +650,12 @@ const Online = (() => {
     else $("#q-wait").textContent = msg;
   }
 
-  function onHostLost() {
+  function onHostLost(reason) {
     if (!api.active) return;
     const atEnd = view && view.phase === "end";
     lsSet(LS_GUEST, null);
     cleanup();
-    if (!atEnd) fail("L'hôte a quitté la partie.");
+    if (!atEnd || reason) fail(reason || "L'hôte a quitté la partie.");
   }
 
   function sendAnswer(choice, ms, text) {
@@ -645,6 +717,8 @@ const Online = (() => {
 
       case "presence": renderPresence(m.players); break;
 
+      case "notice": showNotice(m.text); break;
+
       case "question": showOnlineQuestion(m); break;
 
       case "soon":
@@ -679,6 +753,16 @@ const Online = (() => {
 
       case "end": showEnd(m); break;
     }
+  }
+
+  // Message de l'administrateur (bandeau en haut de l'écran)
+  function showNotice(text) {
+    let el = document.getElementById("admin-notice");
+    if (!el) { el = document.createElement("div"); el.id = "admin-notice"; el.className = "admin-notice"; document.body.prepend(el); }
+    el.textContent = "📢 " + text;
+    el.classList.remove("hidden");
+    clearTimeout(showNotice.t);
+    showNotice.t = setTimeout(() => el.classList.add("hidden"), 12000);
   }
 
   function renderPresence(list) {

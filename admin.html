@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Administration du quiz</title>
+  <link rel="stylesheet" href="css/style.css?v=202611061004" />
+  <link rel="stylesheet" href="css/admin.css?v=202611061004" />
+</head>
+<body>
+  <main class="app admin">
+    <h1>🛡️ Administration</h1>
+    <p class="subtitle">Toutes les salles en ligne du quiz, en direct</p>
+
+    <!-- Connexion -->
+    <section id="login" class="card center">
+      <h2>Mot de passe administrateur</h2>
+      <div class="player-row">
+        <input type="password" id="pwd" placeholder="Mot de passe" autocomplete="current-password" />
+        <button id="login-btn" class="btn-join">Entrer</button>
+      </div>
+      <p id="login-msg" class="feedback bad"></p>
+      <p class="hint">Le mot de passe déverrouille la clé qui signe tes actions. Sans lui, personne ne peut fermer une salle ni bloquer un joueur.</p>
+    </section>
+
+    <!-- Tableau de bord -->
+    <section id="dash" class="hidden">
+      <div class="card adm-top">
+        <div id="servers" class="adm-servers"></div>
+        <div id="summary" class="adm-summary"></div>
+        <button id="logout" class="btn-link">Se déconnecter</button>
+      </div>
+
+      <h2>Salles en cours</h2>
+      <p class="hint">Les salles apparaissent dès qu'elles sont créées (sur n'importe quel serveur). Une salle fermée disparaît au bout de 2 minutes.</p>
+      <div id="rooms"></div>
+
+      <h2>Joueurs bloqués</h2>
+      <div class="card">
+        <p class="hint">Un joueur bloqué ne peut plus créer ni rejoindre de partie en ligne. « Appareil » bloque son navigateur ; « Pseudo » bloque un nom (insensible aux majuscules).</p>
+        <div class="player-row">
+          <input type="text" id="ban-name" maxlength="20" placeholder="Bloquer un pseudo…" />
+          <button id="ban-name-btn" class="btn-join">Bloquer</button>
+        </div>
+        <div id="bans"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/lib/mqtt.min.js?v=202611061004"></script>
+  <script src="js/net-config.js?v=202611061004"></script>
+  <script src="js/admin.js?v=202611061004"></script>
+</body>
+</html>

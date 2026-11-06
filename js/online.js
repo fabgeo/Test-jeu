@@ -1,66 +1,58 @@
 // =========================================================
 //  MODE EN LIGNE (chacun sur son appareil)
-//  Les messages passent par un serveur relais public gratuit (MQTT sur WebSocket) :
-//  ça marche quel que soit le réseau (4G, box, wifi d'école…).
-//  L'hôte crée une salle avec un code ; il gère les questions, les scores,
-//  la présence des joueurs et la pause.
-//  Sujets (topics) d'une salle :
-//    <racine>/<CODE>/host    : messages des joueurs vers l'hôte
-//    <racine>/<CODE>/all     : messages de l'hôte vers tout le monde
-//    <racine>/<CODE>/p/<id>  : messages de l'hôte vers un joueur précis
+//  Même méthode que le jeu « Taupe » (github.com/fabgeo/taupe) :
+//  les messages passent par un relais MQTT public gratuit (WebSocket sécurisé),
+//  ce qui marche derrière n'importe quelle box / 4G / wifi.
+//
+//  L'appareil de l'hôte fait tourner la partie. Sujets d'une salle :
+//    <racine>/<CODE>/host    message RETENU « l'hôte est en ligne », renvoyé toutes les 10 s,
+//                            effacé par le testament MQTT si l'hôte disparaît
+//    <racine>/<CODE>/act     joueurs -> hôte (join, réponses, ping, bye en testament)
+//    <racine>/<CODE>/all     hôte -> tout le monde
+//    <racine>/<CODE>/p/<id>  hôte -> un joueur précis
+//
+//  Pour rejoindre, le joueur essaie chaque relais et garde celui où il trouve
+//  le message retenu /host de la salle.
 // =========================================================
 
 const Online = (() => {
-  const ROOT = "quiz-revisions-fabgeo/v2/";
-  // Serveurs relais publics (le dernier caractère du code de salle indique lequel est utilisé)
-  const BROKERS = [
+  const params = new URLSearchParams(location.search);
+  const ROOT = "quiz-revisions-fabgeo/v3/";
+  // Relais publics essayés dans l'ordre (?mqtt=ws://a,ws://b pour tester avec des relais locaux)
+  const BROKERS = params.get("mqtt") ? params.get("mqtt").split(",") : [
     "wss://broker.emqx.io:8084/mqtt",
     "wss://broker.hivemq.com:8884/mqtt",
     "wss://test.mosquitto.org:8081/mqtt",
   ];
-  const BROKER_TAG = "ABC"; // A = 1er serveur, B = 2e, C = 3e
-  const CONNECT_TIMEOUT_MS = 7000;
-  const HOST_SILENCE_MS = 45000; // sans nouvelles de l'hôte pendant 45 s => partie terminée
   const MAX_ONLINE = 12;
-  const GRACE_MS = 1000;       // marge réseau après la fin du chrono
-  const PING_MS = 2000;        // les invités donnent signe de vie toutes les 2 s
-  const ABSENT_AFTER_MS = 7000; // sans nouvelles depuis 7 s => absent
-  const PRESENCE = {
-    present: ["🟢", "Présent"],
-    away: ["🟡", "Inactif"],
-    absent: ["🔴", "Absent"],
-  };
+  const GRACE_MS = 1000;          // marge réseau après la fin du chrono
+  const PING_MS = 2000;           // les joueurs donnent signe de vie toutes les 2 s
+  const ABSENT_AFTER_MS = 7000;   // sans nouvelles depuis 7 s => absent
+  const HOST_BEAT_MS = 10000;     // l'hôte redit « je suis là » toutes les 10 s
+  const FIND_WAIT_MS = 4000;      // attente du message retenu /host sur chaque relais
+  const HOST_AWAY_MAX_MS = 180000; // l'hôte disparu depuis 3 min => fin
+  const RESUME_MAX_MS = 15 * 60 * 1000; // reprise auto après rechargement (15 min)
+  const PRESENCE = { present: ["🟢", "Présent"], away: ["🟡", "Inactif"], absent: ["🔴", "Absent"] };
 
-  // Pour les tests : ?mqtt=ws://127.0.0.1:8888 (serveur relais local)
-  const params = new URLSearchParams(location.search);
-  const brokerUrl = (code) => params.get("mqtt") || BROKERS[Math.max(0, BROKER_TAG.indexOf(code[4]))] || BROKERS[0];
-  const topic = (code, sub) => ROOT + code + "/" + sub;
+  // ---------- Stockage local (identifiant et reprise après rechargement) ----------
+  const LS_UID = "quiz-online-uid", LS_GUEST = "quiz-online-guest", LS_HOST = "quiz-online-host";
+  const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
+  const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} };
   const randId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-
-  function mqttConnect(url, clientId, will) {
-    return mqtt.connect(url, {
-      clientId, clean: true, keepalive: 20, reconnectPeriod: 2000,
-      connectTimeout: CONNECT_TIMEOUT_MS, resubscribe: true,
-      will: { topic: will.topic, payload: JSON.stringify(will.msg), qos: 1, retain: false },
-    });
-  }
-  function publish(t, msg, qos = 1) {
-    if (mq) mq.publish(t, JSON.stringify(msg), { qos });
-  }
+  let UID = lsGet(LS_UID);
+  if (typeof UID !== "string" || UID.length < 6) { UID = randId(); lsSet(LS_UID, UID); }
 
   const api = { active: false };
-  let mq = null;            // client MQTT (connexion au serveur relais)
+  let mq = null;            // client MQTT
+  let session = 0;          // change à chaque nouvelle connexion (annule les anciennes)
   let isHost = false;
   let myId = null;
-  let hostConn = null;      // (invité) connexion vers l'hôte
+  let hostConn = null;      // (joueur) envoi vers l'hôte
   const conns = new Map();  // (hôte) id -> connexion
-  let st = null;            // (hôte) état de la partie
-  let view = null;          // affichage local (hôte et invités)
-  let localTimer = null;
-  let presenceTimer = null; // (hôte) diffusion de la présence
-  let pingTimer = null;     // (invité) signe de vie
-  let hostWatch = null;     // (invité) surveille que l'hôte est toujours là
-  let lastHostMsg = 0;
+  let st = null;            // (hôte) état complet de la partie
+  let view = null;          // affichage local
+  let localTimer = null, presenceTimer = null, beatTimer = null, pingTimer = null, hostWatch = null;
+  let lastHostMsg = 0, hostAwaySince = 0;
 
   // ---------- Utilitaires ----------
   const genCode = () => {
@@ -71,19 +63,39 @@ const Online = (() => {
   try { $("#online-name").value = localStorage.getItem("quiz-cultureg-name") || ""; } catch {}
   $("#online-name").addEventListener("change", () => { try { localStorage.setItem("quiz-cultureg-name", myName()); } catch {} });
   const setError = (msg) => { $("#online-error").textContent = msg || ""; };
+  const setNet = (msg) => { $("#net-status").textContent = msg || ""; };
+  const T = (code, sub) => ROOT + code + "/" + sub;
+  const parse = (buf) => { try { const s = buf.toString(); return s ? JSON.parse(s) : null; } catch { return null; } };
+
+  function pub(t, msg, { retain = false, qos = 1 } = {}) {
+    if (mq) mq.publish(t, msg == null ? "" : JSON.stringify(msg), { qos, retain });
+  }
+
+  // Connexion à un relais : renvoie le client, ou null au bout de 8 s
+  function connectTo(i, will) {
+    return new Promise((resolve) => {
+      const c = mqtt.connect(BROKERS[i], {
+        clientId: "qz_" + randId(), clean: true, connectTimeout: 7000, reconnectPeriod: 2500, keepalive: 30, will,
+      });
+      let done = false;
+      const fail = () => { if (done) return; done = true; try { c.end(true); } catch {} resolve(null); };
+      const t = setTimeout(fail, 8000);
+      c.once("connect", () => { if (done) return; done = true; clearTimeout(t); resolve(c); });
+      c.once("error", fail);
+    });
+  }
 
   function cleanup() {
+    session++;
     clearTimeout(st && st.timer);
-    clearInterval(localTimer);
-    clearInterval(presenceTimer);
-    clearInterval(pingTimer);
-    clearInterval(hostWatch);
+    [localTimer, presenceTimer, beatTimer, pingTimer, hostWatch].forEach(clearInterval);
     api.active = false;
     conns.clear();
-    if (mq) { const c = mq; setTimeout(() => { try { c.end(true); } catch {} }, 300); } // laisse partir le dernier message
-    mq = null; hostConn = null; st = null; view = null; myId = null;
+    if (mq) { const c = mq; setTimeout(() => { try { c.end(true); } catch {} }, 400); } // laisse partir les derniers messages
+    mq = null; hostConn = null; st = null; view = null; myId = null; hostAwaySince = 0;
     showPauseButton(false);
     $("#q-players").classList.add("hidden");
+    setNet("");
   }
 
   function fail(msg) {
@@ -97,72 +109,101 @@ const Online = (() => {
     u.hash = "";
     [...u.searchParams.keys()].forEach((k) => { if (k !== "mqtt") u.searchParams.delete(k); });
     u.searchParams.set("salle", code);
+    if (st && st.broker) u.searchParams.set("b", st.broker);
     return u.toString();
   }
 
   // ======================================================
   //  CÔTÉ HÔTE
   // ======================================================
-  api.host = (brokerIndex = 0) => {
+  api.host = async (resume = null) => {
+    if (!window.mqtt) return setError("Le module de connexion n'a pas chargé. Vérifie ta connexion internet.");
     setError("");
     cleanup();
+    const my = session;
     isHost = true;
-    const code = genCode().slice(0, 4) + BROKER_TAG[brokerIndex];
-    st = {
-      code, phase: "lobby", qi: 0, questions: [], answers: {}, timer: null, paused: false,
+    myId = "host";
+    const code = resume ? resume.code : genCode();
+    st = resume || {
+      code, phase: "lobby", qi: 0, questions: [], answers: {}, paused: false, broker: 0,
       conf: { theme: settings.theme, nb: settings.nbQuestions, time: settings.time },
       players: [{ id: "host", name: myName(), score: 0, correct: 0 }],
     };
-    myId = "host";
+    st.timer = null;
+    if (resume) st.players.forEach((p) => { if (p.id !== "host") p.lastSeen = 0; }); // absents tant qu'ils ne se manifestent pas
 
-    $("#lobby-code").textContent = "…";
+    $("#lobby-code").textContent = code;
     $("#lobby-share").classList.add("hidden");
-    $("#lobby-status").textContent = "Création de la salle…";
     $("#lobby-start").classList.add("hidden");
     $("#lobby-players").innerHTML = "";
     showScreen("screen-lobby");
 
-    const client = mq = mqttConnect(brokerUrl(code), "qh-" + randId(), { topic: topic(code, "all"), msg: { t: "hostgone" } });
-    // Si ce serveur ne répond pas, on essaie le suivant
-    const giveUp = setTimeout(() => {
-      if (api.active || mq !== client) return;
-      if (!params.get("mqtt") && brokerIndex + 1 < BROKERS.length) api.host(brokerIndex + 1);
-      else fail("Impossible de créer la salle : serveur injoignable. Vérifie ta connexion internet.");
-    }, CONNECT_TIMEOUT_MS + 1000);
+    // On essaie les relais dans l'ordre ; le testament efface « hôte en ligne » si on disparaît
+    let c = null, i = 0;
+    for (; i < BROKERS.length && !c; i++) {
+      $("#lobby-status").textContent = `Connexion au serveur ${i + 1}/${BROKERS.length}…`;
+      c = await connectTo(i, { topic: T(code, "host"), payload: "", retain: true, qos: 1 });
+      if (my !== session) { try { c && c.end(true); } catch {} return; }
+    }
+    if (!c) return fail("Impossible de joindre le serveur de jeu. Vérifie ta connexion internet.");
+    mq = c;
+    st.broker = i - 1;
 
-    client.on("connect", () => {
-      client.subscribe(topic(code, "host"), { qos: 1 }, (err) => {
-        if (err || mq !== client || api.active) return;
-        clearTimeout(giveUp);
-        api.active = true;
-        $("#lobby-share").classList.remove("hidden");
-        $("#lobby-link").value = shareLink(code);
-        broadcastLobby();
-        presenceTimer = setInterval(hostTick, 1500);
-      });
-    });
-    client.on("message", (t, payload) => {
-      if (mq !== client) return;
-      let d; try { d = JSON.parse(payload.toString()); } catch { return; }
+    const announce = () => pub(T(code, "host"), { on: true, at: Date.now() }, { retain: true });
+    c.on("message", (t, buf) => {
+      if (my !== session || t !== T(code, "act")) return;
+      const d = parse(buf);
       if (!d || typeof d.from !== "string") return;
-      onHostData(conns.get(d.from) || makeConn(d.from), d);
+      const id = d.from.slice(0, 40);
+      onHostData(conns.get(id) || makeConn(id), d);
+    });
+    c.on("connect", () => { if (my === session) c.subscribe(T(code, "act"), { qos: 1 }, announce); }); // après une coupure
+    c.subscribe(T(code, "act"), { qos: 1 }, (err) => {
+      if (err || my !== session) return;
+      announce();
+      api.active = true;
+      $("#lobby-share").classList.remove("hidden");
+      $("#lobby-link").value = shareLink(code);
+      beatTimer = setInterval(() => { if (my === session && c.connected) announce(); }, HOST_BEAT_MS);
+      presenceTimer = setInterval(hostTick, 1500);
+      resumeBroadcast();
     });
   };
 
-  // Objet « connexion » vers un joueur (messages privés via son sujet)
+  // Après création (ou reprise), on renvoie l'état à tout le monde
+  function resumeBroadcast() {
+    if (st.phase === "lobby") return broadcastLobby();
+    if (st.phase === "end") return broadcast(st.lastEnd);
+    // partie en cours : on la remet en pause pour laisser les joueurs revenir
+    if (st.phase === "question" && st.conf.time && !st.paused) {
+      st.paused = true; st.pausedAt = Date.now();
+      st.remaining = Math.max(2000, (st.deadline || Date.now()) - Date.now());
+    }
+    const now = st.paused ? st.pausedAt : Date.now();
+    broadcast({ ...st.lastQuestion, players: publicPlayers(), elapsed: now - st.qStart - st.pausedTotal });
+    if (st.phase === "question" && st.paused) broadcast({ t: "pause" });
+    if (st.phase === "reveal") broadcast(st.lastReveal);
+  }
+
   function makeConn(id) {
-    return { peer: id, open: true, send: (msg) => publish(topic(st.code, "p/" + id), msg), close() { this.open = false; } };
+    return { peer: id, open: true, send: (msg) => pub(T(st.code, "p/" + id), msg), close() { this.open = false; } };
   }
 
   function sendTo(id, msg) {
     if (id === "host") return handle(msg);
-    const c = conns.get(id);
-    if (c && c.open) c.send(msg);
+    const c = conns.get(id) || makeConn(id);
+    c.send(msg);
   }
 
   function broadcast(msg) {
-    publish(topic(st.code, "all"), msg, msg.t === "presence" ? 0 : 1);
+    pub(T(st.code, "all"), msg, { qos: msg.t === "presence" ? 0 : 1 });
     handle(msg); // l'hôte s'affiche aussi le message
+  }
+
+  function persistHost() {
+    if (!st) return;
+    const { timer, ...save } = st;
+    lsSet(LS_HOST, { st: save, at: Date.now() });
   }
 
   // ----- Présence -----
@@ -182,10 +223,10 @@ const Online = (() => {
   }
 
   function hostTick() {
-    if (!st) return;
+    if (!st || !api.active) return;
     broadcast({ t: "presence", players: presenceList() });
-    // un joueur devenu absent ne doit pas bloquer la question
-    if (st.phase === "question" && !st.paused) checkAllAnswered();
+    if (st.phase === "question" && !st.paused) checkAllAnswered(); // un absent ne bloque pas la question
+    persistHost();
   }
 
   function publicPlayers() {
@@ -195,67 +236,65 @@ const Online = (() => {
   }
 
   function lobbyMsg() {
-    const t = THEMES[st.conf.theme];
+    const t = THEMES[st.conf.theme] || THEMES[Object.keys(THEMES)[0]];
     return {
-      t: "lobby", code: st.code,
-      players: presenceList(),
+      t: "lobby", code: st.code, players: presenceList(),
       info: `${t.icon || "📚"} ${t.name} · ${st.conf.nb} questions · ${st.conf.time ? st.conf.time + " s par question" : "temps illimité"}`,
     };
   }
-  function broadcastLobby() { broadcast(lobbyMsg()); }
+  function broadcastLobby() { broadcast(lobbyMsg()); persistHost(); }
 
   function onHostData(conn, d) {
-    if (!d || typeof d !== "object" || !st) return;
+    if (!st) return;
     const id = conn.peer;
     const known = st.players.find((p) => p.id === id);
     if (known) {
       known.lastSeen = Date.now();
-      // un joueur marqué parti qui donne de nouveau signe de vie (ex. téléphone sorti de veille)
-      if (known.left && d.t !== "bye") { known.left = false; conns.set(id, makeConn(id)); }
+      if (known.left && d.t !== "bye") { known.left = false; conns.set(id, conn); } // il revient
     }
 
-    if (d.t === "ping") {
-      if (known) known.visible = !!d.visible;
-      return;
-    }
-
-    if (d.t === "bye") return removePlayer(id); // le joueur a fermé la page
+    if (d.t === "ping") { if (known) known.visible = !!d.visible; return; }
+    if (d.t === "bye") return removePlayer(id);
 
     if (d.t === "join") {
       let name = String(d.name || "Joueur").trim().slice(0, 20) || "Joueur";
+      conns.set(id, conn);
 
-      // Reconnexion d'un joueur absent avec le même pseudo : il retrouve sa place et ses points
+      // Déjà dans la salle (reconnexion, rechargement de page…) : on lui renvoie l'état
+      if (known) {
+        known.visible = true;
+        conn.send({ t: "welcome", you: id, code: st.code });
+        resync(id);
+        return hostTick();
+      }
+
+      // Même pseudo qu'un joueur absent : il retrouve sa place et ses points
       const ghost = st.players.find((p) => p.id !== "host" && p.name === name && statusOf(p) === "absent");
       if (ghost) {
-        const old = conns.get(ghost.id);
-        if (old && old !== conn) { try { old.close(); } catch {} conns.delete(ghost.id); }
-        conns.set(id, conn);
+        conns.delete(ghost.id);
+        if (st.answers[ghost.id]) { st.answers[id] = st.answers[ghost.id]; delete st.answers[ghost.id]; }
         ghost.id = id; ghost.left = false; ghost.lastSeen = Date.now(); ghost.visible = true;
         conn.send({ t: "welcome", you: id, code: st.code });
         resync(id);
-        hostTick();
-        return;
+        return hostTick();
       }
 
-      // message reçu deux fois : le joueur est déjà là
-      if (known) { conns.set(id, conn); conn.send({ t: "welcome", you: id, code: st.code }); return resync(id); }
-      if (st.phase !== "lobby") return refuse(conn, "La partie a déjà commencé. Attends la prochaine !");
-      if (st.players.filter((p) => !p.left).length >= MAX_ONLINE) return refuse(conn, "La salle est pleine.");
+      if (st.phase !== "lobby") { conns.delete(id); return conn.send({ t: "refused", msg: "La partie a déjà commencé. Attends la prochaine !" }); }
+      if (st.players.filter((p) => !p.left).length >= MAX_ONLINE) { conns.delete(id); return conn.send({ t: "refused", msg: "La salle est pleine." }); }
       const base = name; let n = 2;
       while (st.players.some((p) => p.name === name)) name = `${base} ${n++}`;
-      conns.set(id, conn);
       st.players.push({ id, name, score: 0, correct: 0, lastSeen: Date.now(), visible: true });
       conn.send({ t: "welcome", you: id, code: st.code });
-      conn.send(lobbyMsg()); // en privé, pour être sûr qu'il arrive après « welcome »
+      conn.send(lobbyMsg()); // en privé, pour qu'il arrive après « welcome »
       broadcastLobby();
     }
 
     if (d.t === "answer") onAnswer(id, d.qi, d.choice, d.ms);
   }
 
-  // Renvoie l'état actuel de la partie à un joueur qui revient
+  // Renvoie l'état actuel à un joueur qui (re)arrive
   function resync(id) {
-    if (st.phase === "lobby") { sendTo(id, lobbyMsg()); return broadcastLobby(); }
+    if (st.phase === "lobby") return sendTo(id, lobbyMsg());
     if (st.phase === "end") return sendTo(id, st.lastEnd);
     const now = st.paused ? st.pausedAt : Date.now();
     sendTo(id, { ...st.lastQuestion, players: publicPlayers(), elapsed: now - st.qStart - st.pausedTotal });
@@ -263,25 +302,19 @@ const Online = (() => {
     if (st.phase === "reveal") sendTo(id, st.lastReveal);
   }
 
-  function refuse(conn, msg) {
-    conn.send({ t: "refused", msg });
-    setTimeout(() => conn.close(), 500);
-  }
-
   function removePlayer(id) {
-    if (!st || !conns.has(id)) return;
+    if (!st) return;
     conns.delete(id);
     const p = st.players.find((x) => x.id === id);
-    if (p) p.left = true; // il reste affiché comme « Absent »
-    if (st.phase === "lobby") broadcastLobby();
-    else hostTick();
+    if (p) p.left = true; // reste affiché « Absent »
+    if (st.phase === "lobby") broadcastLobby(); else hostTick();
   }
 
   // L'hôte retire définitivement un joueur
   api.kick = (id) => {
     if (!isHost || !st || id === "host") return;
-    const c = conns.get(id);
-    if (c) { try { c.send({ t: "refused", msg: "L'hôte t'a retiré de la salle." }); } catch {} setTimeout(() => c.close(), 300); conns.delete(id); }
+    sendTo(id, { t: "refused", msg: "L'hôte t'a retiré de la salle." });
+    conns.delete(id);
     st.players = st.players.filter((p) => p.id !== id);
     if (st.phase === "lobby") broadcastLobby(); else hostTick();
   };
@@ -329,6 +362,7 @@ const Online = (() => {
       st.timer = setTimeout(reveal, st.remaining);
       broadcast({ t: "resume" });
     }
+    persistHost();
   };
 
   function onAnswer(id, qi, choice, ms) {
@@ -370,11 +404,11 @@ const Online = (() => {
   function endOnline() {
     st.phase = "end";
     const t = THEMES[st.conf.theme];
-    st.lastEnd = { t: "end", players: publicPlayers(), total: st.questions.length, theme: st.conf.theme, themeName: t.name };
+    st.lastEnd = { t: "end", players: publicPlayers(), total: st.questions.length, theme: st.conf.theme, themeName: t ? t.name : "" };
     broadcast(st.lastEnd);
+    persistHost();
   }
 
-  // Bouton "Suivant" / "Révéler" (hôte uniquement)
   api.next = () => {
     if (!isHost || !st) return;
     if (st.phase === "question") return reveal();
@@ -384,7 +418,6 @@ const Online = (() => {
     }
   };
 
-  // Nouvelle partie dans la même salle
   api.backToLobby = () => {
     if (!isHost || !st) return;
     st.phase = "lobby";
@@ -393,94 +426,142 @@ const Online = (() => {
   };
 
   // ======================================================
-  //  CÔTÉ INVITÉ
+  //  CÔTÉ JOUEUR
   // ======================================================
-  api.join = (raw) => {
+  api.join = async (raw, attempt = 1) => {
+    if (!window.mqtt) return setError("Le module de connexion n'a pas chargé. Vérifie ta connexion internet.");
     const code = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (code.length !== 5) return setError("Le code de la salle doit faire 5 caractères.");
     setError("");
     cleanup();
+    const my = session;
     isHost = false;
+    myId = UID;
+    lsSet(LS_GUEST, { code, name: myName(), at: Date.now() });
     $("#join-btn").disabled = true;
     $("#join-btn").textContent = "…";
     const restoreBtn = () => { $("#join-btn").disabled = false; $("#join-btn").textContent = "Rejoindre"; };
 
-    const me = randId();
-    const client = mq = mqttConnect(brokerUrl(code), "qp-" + me, { topic: topic(code, "host"), msg: { t: "bye", from: me } });
-    hostConn = { open: false, send: (msg) => publish(topic(code, "host"), { ...msg, from: me }, msg.t === "ping" ? 0 : 1) };
-    let connectedOnce = false;
-    const timeout = setTimeout(() => {
-      if (api.active || mq !== client) return;
+    // Ordre d'essai : relais indiqué dans le lien d'invitation, puis tous les autres
+    const hint = params.has("b") ? Number(params.get("b")) : NaN;
+    const order = [Number.isInteger(hint) ? hint : null, ...BROKERS.keys()]
+      .filter((v, i, a) => v != null && v >= 0 && v < BROKERS.length && a.indexOf(v) === i);
+
+    let found = null, reached = 0;
+    for (const [k, i] of order.entries()) {
+      setNet(`Recherche de la salle ${code} sur le serveur ${k + 1}/${order.length}…`);
+      const c = await connectTo(i, { topic: T(code, "act"), payload: JSON.stringify({ t: "bye", from: UID }), retain: false, qos: 1 });
+      if (my !== session) { try { c && c.end(true); } catch {} return; }
+      if (!c) continue;
+      reached++;
+      const ok = await new Promise((res) => {
+        const t = setTimeout(() => res(false), FIND_WAIT_MS);
+        c.on("message", (tp, buf) => { const m = parse(buf); if (tp === T(code, "host") && m && m.on) { clearTimeout(t); res(true); } });
+        c.subscribe(T(code, "host"), { qos: 1 });
+      });
+      if (my !== session) { try { c.end(true); } catch {} return; }
+      if (ok) { found = c; break; }
+      try { c.end(true); } catch {}
+    }
+
+    if (!found) {
+      if (!reached) { restoreBtn(); return fail("Impossible de joindre le serveur de jeu. Vérifie ta connexion internet."); }
+      if (attempt < 3) {
+        setNet(`Salle ${code} pas encore trouvée… nouvel essai dans 5 s (${attempt}/3)`);
+        setTimeout(() => { if (my === session) api.join(code, attempt + 1); }, 5000);
+        return;
+      }
       restoreBtn();
-      fail(connectedOnce
-        ? "Salle introuvable : vérifie le code, et que la partie a bien été créée."
-        : "Connexion au serveur impossible. Vérifie ta connexion internet.");
+      lsSet(LS_GUEST, null);
+      return fail(`Salle ${code} introuvable : vérifie le code, et que l'hôte a bien créé la salle (et ne l'a pas quittée).`);
+    }
+
+    // Salle trouvée sur ce relais
+    const c = mq = found;
+    setNet("Salle trouvée ✔ Connexion à l'hôte…");
+    hostConn = { open: true, send: (msg) => pub(T(code, "act"), { ...msg, from: UID }, { qos: msg.t === "ping" ? 0 : 1 }) };
+    const hello = () => hostConn.send({ t: "join", name: myName() });
+    lastHostMsg = Date.now();
+
+    const welcomeTimeout = setTimeout(() => {
+      if (my === session && !api.active) { restoreBtn(); fail("La salle existe mais l'hôte ne répond pas. Réessaie dans un instant."); }
     }, 12000);
 
-    client.on("connect", () => {
-      connectedOnce = true;
-      client.subscribe([topic(code, "all"), topic(code, "p/" + me)], { qos: 1 }, (err) => {
-        if (err || mq !== client) return;
-        hostConn.open = true;
-        if (!api.active) hostConn.send({ t: "join", name: myName() });
-      });
-    });
-    client.on("message", (t, payload) => {
-      if (mq !== client) return;
-      let d; try { d = JSON.parse(payload.toString()); } catch { return; }
+    c.on("message", (t, buf) => {
+      if (my !== session) return;
+      const d = parse(buf);
+      if (t === T(code, "host")) {
+        if (!d || !d.on) hostDisconnected();
+        else if (hostAwaySince) { hostAwaySince = 0; hello(); } // l'hôte est revenu : on se resynchronise
+        return;
+      }
       if (!d || typeof d !== "object") return;
-      const isPrivate = t.endsWith("/p/" + me);
+      const isPrivate = t === T(code, "p/" + UID);
       if (!api.active && !isPrivate) return; // pas encore accepté dans la salle
       lastHostMsg = Date.now();
-      if (d.t === "hostgone") return hostDisconnected();
       if (d.t === "hostleft") return onHostLost();
       if (d.t === "welcome") {
-        clearTimeout(timeout); restoreBtn();
+        clearTimeout(welcomeTimeout); restoreBtn(); setNet("");
         clearInterval(pingTimer); pingTimer = setInterval(sendPing, PING_MS);
-        clearInterval(hostWatch); hostWatch = setInterval(() => { if (Date.now() - lastHostMsg > HOST_SILENCE_MS) onHostLost(); }, 3000);
+        clearInterval(hostWatch);
+        hostWatch = setInterval(() => {
+          if (hostAwaySince && Date.now() - hostAwaySince > HOST_AWAY_MAX_MS) onHostLost();
+        }, 3000);
       }
       handle(d);
     });
+    const topics = [T(code, "all"), T(code, "p/" + UID), T(code, "host")];
+    c.on("connect", () => { if (my === session) c.subscribe(topics, { qos: 1 }, hello); }); // après une coupure
+    c.subscribe(topics, { qos: 1 }, hello);
   };
 
-  // L'hôte a perdu sa connexion (ex. téléphone en veille) : on attend son retour
+  function sendPing() {
+    if (hostConn) hostConn.send({ t: "ping", visible: !document.hidden });
+  }
+
+  // L'hôte a perdu sa connexion (ex. téléphone en veille, page rechargée) : on attend son retour
   function hostDisconnected() {
+    if (!hostAwaySince) hostAwaySince = Date.now();
     const msg = "⚠️ L'hôte s'est déconnecté… en attente de son retour.";
     if (view && view.phase === "lobby") $("#lobby-status").textContent = msg;
     else $("#q-wait").textContent = msg;
   }
 
-  function sendPing() {
-    if (hostConn && hostConn.open) hostConn.send({ t: "ping", visible: !document.hidden });
-  }
-
-  // Quand on change d'onglet / d'appli, on prévient tout de suite
-  document.addEventListener("visibilitychange", () => {
-    if (!api.active) return;
-    if (isHost) hostTick(); else sendPing();
-  });
-
   function onHostLost() {
     if (!api.active) return;
     const atEnd = view && view.phase === "end";
+    lsSet(LS_GUEST, null);
     cleanup();
     if (!atEnd) fail("L'hôte a quitté la partie.");
   }
 
   function sendAnswer(choice, ms) {
     if (isHost) onAnswer("host", view.qi, choice, ms);
-    else if (hostConn && hostConn.open) hostConn.send({ t: "answer", qi: view.qi, choice, ms });
+    else if (hostConn) hostConn.send({ t: "answer", qi: view.qi, choice, ms });
   }
 
+  // Quitter volontairement
   api.leave = () => {
-    if (!isHost && hostConn && hostConn.open) { try { hostConn.send({ t: "bye" }); } catch {} }
-    if (isHost && st) publish(topic(st.code, "all"), { t: "hostleft" });
-    cleanup(); // les invités voient la connexion se fermer
+    if (isHost && st) {
+      pub(T(st.code, "all"), { t: "hostleft" });
+      pub(T(st.code, "host"), null, { retain: true }); // efface « hôte en ligne »
+      lsSet(LS_HOST, null);
+    } else if (hostConn) {
+      hostConn.send({ t: "bye" });
+      lsSet(LS_GUEST, null);
+    }
+    cleanup();
     showScreen("screen-setup");
   };
 
+  document.addEventListener("visibilitychange", () => {
+    if (!api.active) return;
+    if (document.visibilityState === "visible" && mq && !mq.connected) { try { mq.reconnect(); } catch {} }
+    if (isHost) hostTick(); else sendPing();
+  });
+
   // ======================================================
-  //  AFFICHAGE (commun hôte / invités)
+  //  AFFICHAGE (commun hôte / joueurs)
   // ======================================================
   function handle(m) {
     if (!m || typeof m !== "object") return;
@@ -491,6 +572,7 @@ const Online = (() => {
         break;
 
       case "refused":
+        lsSet(LS_GUEST, null);
         fail(m.msg);
         break;
 
@@ -544,22 +626,22 @@ const Online = (() => {
 
   function renderPresence(list) {
     if (!list) return;
-    const ul = $("#lobby-players");
-    ul.innerHTML = list.map((p, i) => {
+    $("#lobby-players").innerHTML = list.map((p, i) => {
       const [dot, label] = PRESENCE[p.status] || PRESENCE.present;
       const kick = isHost && p.id !== "host" && p.status === "absent"
         ? `<button class="kick" data-id="${escapeHtml(p.id)}" title="Retirer ce joueur">✕</button>` : "";
       return `<li class="st-${p.status}">${i === 0 ? "👑 " : ""}${escapeHtml(p.name)}${p.id === myId ? " (toi)" : ""} <span class="st">${dot} ${label}</span>${kick}</li>`;
     }).join("");
 
-    const present = list.filter((p) => p.status === "present").length;
-    const absent = list.filter((p) => p.status === "absent").length;
-    $("#lobby-status").textContent = isHost
-      ? `${present} présent(s)` + (absent ? ` · ${absent} absent(s) (clique ✕ pour retirer)` : "") +
-        (list.length < 2 ? " — en attente d'autres joueurs… (tu peux aussi lancer seul)" : "")
-      : "En attente que l'hôte lance la partie…";
+    if (!hostAwaySince) {
+      const present = list.filter((p) => p.status === "present").length;
+      const absent = list.filter((p) => p.status === "absent").length;
+      $("#lobby-status").textContent = isHost
+        ? `${present} présent(s)` + (absent ? ` · ${absent} absent(s) (clique ✕ pour retirer)` : "") +
+          (list.length < 2 ? " — en attente d'autres joueurs… (tu peux aussi lancer seul)" : "")
+        : "En attente que l'hôte lance la partie…";
+    }
 
-    // Pendant la partie : bandeau des joueurs au-dessus de la question
     const bar = $("#q-players");
     if (view && (view.phase === "question" || view.phase === "reveal")) {
       bar.classList.remove("hidden");
@@ -625,13 +707,9 @@ const Online = (() => {
     });
     if (isHost && !m.time) showSkip();
 
-    // chrono
     clearInterval(localTimer);
     if (!m.time) $("#timer-wrap").classList.add("hidden");
-    else {
-      $("#timer-wrap").classList.remove("hidden");
-      startLocalTimer();
-    }
+    else { $("#timer-wrap").classList.remove("hidden"); startLocalTimer(); }
     showScreen("screen-question");
   }
 
@@ -667,6 +745,7 @@ const Online = (() => {
     }
   }
 
+  let lastSavedEnd = null;
   function showEnd(m) {
     clearInterval(localTimer);
     view = { phase: "end" };
@@ -675,9 +754,11 @@ const Online = (() => {
     renderResults(m.players, m.total);
     $$("#results-body tr").forEach((tr, i) => tr.classList.toggle("me", m.players[i].id === myId));
 
-    // on enregistre son propre score dans le classement de cet appareil
+    // on enregistre son propre score dans le classement de cet appareil (une seule fois)
     const mine = m.players.find((p) => p.id === myId);
-    if (mine) {
+    const key = JSON.stringify(m.players);
+    if (mine && lastSavedEnd !== key) {
+      lastSavedEnd = key;
       const board = loadBoard();
       board.push({ name: mine.name, theme: m.theme, correct: mine.correct, total: m.total, score: mine.score, date: new Date().toLocaleDateString("fr-FR"), mode: "online" });
       board.sort((a, b) => b.score - a.score);
@@ -694,6 +775,7 @@ const Online = (() => {
   // Réglages modifiables par l'hôte dans la salle d'attente
   function renderLobbySettings() {
     const c = st.conf;
+    if (!THEMES[c.theme]) c.theme = Object.keys(THEMES)[0];
     $("#lobby-theme").innerHTML = [...themeGroups()].map(([group, items]) =>
       `<optgroup label="${escapeHtml(group)}">` + items.map(([k, t]) =>
         `<option value="${k}" ${k === c.theme ? "selected" : ""}>${t.icon || "📚"} ${escapeHtml(t.name)} (${t.questions.length})</option>`).join("") +
@@ -733,17 +815,40 @@ const Online = (() => {
       .catch(() => document.execCommand("copy"))
       .finally(() => { $("#copy-link").textContent = "Copié ✔"; setTimeout(() => ($("#copy-link").textContent = "Copier"), 1500); });
   };
-  window.addEventListener("beforeunload", () => { if (api.active) api.leave(); });
-  window.addEventListener("pagehide", () => { if (api.active) api.leave(); });
+  // Fermeture / rechargement de la page : le joueur prévient l'hôte (l'hôte, lui, garde sa salle
+  // pour la reprendre ; s'il ne revient pas, son testament MQTT prévient les joueurs)
+  window.addEventListener("pagehide", () => {
+    if (!api.active) return;
+    if (isHost) persistHost();
+    else if (hostConn) hostConn.send({ t: "bye" });
+  });
 
-  // Lien d'invitation : ?salle=CODE
+  // ---------- Au chargement de la page ----------
   const invite = params.get("salle");
+  const savedHost = lsGet(LS_HOST);
+  const savedGuest = lsGet(LS_GUEST);
+  const fresh = (s) => s && Date.now() - (s.at || 0) < RESUME_MAX_MS;
+
   if (invite) {
+    // Lien d'invitation : ?salle=CODE
     document.querySelector('#mode-group [data-mode="online"]').click();
     $("#join-code").value = invite.toUpperCase();
-    $("#online-error").textContent = "";
     $("#online-zone .hint").textContent = "Tu as été invité(e) ! Entre ton pseudo puis clique sur « Rejoindre ».";
-    $("#online-name").focus();
+    if (fresh(savedGuest) && savedGuest.code === invite.toUpperCase()) setTimeout(() => api.join(invite), 50); // déjà venu : on revient direct
+    else $("#online-name").focus();
+  } else if (fresh(savedHost) && savedHost.st && savedHost.st.code) {
+    // L'hôte a rechargé sa page : on reprend sa salle
+    document.querySelector('#mode-group [data-mode="online"]').click();
+    setTimeout(() => api.host(savedHost.st), 50);
+  } else if (fresh(savedGuest)) {
+    // Un joueur a rechargé sa page : il revient dans sa salle
+    document.querySelector('#mode-group [data-mode="online"]').click();
+    $("#join-code").value = savedGuest.code;
+    if (savedGuest.name) $("#online-name").value = savedGuest.name;
+    setTimeout(() => api.join(savedGuest.code), 50);
+  } else {
+    lsSet(LS_HOST, null);
+    lsSet(LS_GUEST, null);
   }
 
   return api;

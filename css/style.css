@@ -211,3 +211,5 @@ select {
 }
 .pause-title { font-size: 2.4rem; font-weight: 900; }
 .pause-overlay .btn-primary { max-width: 260px; margin: 16px auto 0; }
+
+.net-status { text-align: center; font-weight: 600; color: #c7d2fe; }

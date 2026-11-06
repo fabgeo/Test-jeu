@@ -4,7 +4,7 @@ Jeu de questions à 4 réponses, jouable dans le navigateur.
 
 - Mode **solo**
 - Mode **même appareil** (2 à 8 joueurs, chacun son tour)
-- Mode **en ligne** 🌐 : chacun sur son ordi/téléphone. Un joueur crée une salle (code à 5 lettres + lien à partager), les autres la rejoignent. Les messages passent par un serveur relais public gratuit (MQTT sur WebSocket : EMQX, puis HiveMQ ou Mosquitto en secours), ce qui marche sur tous les réseaux. Aucun serveur à installer.
+- Mode **en ligne** 🌐 : chacun sur son ordi/téléphone. Un joueur crée une salle (code à 5 lettres + lien à partager), les autres la rejoignent. Même méthode que le jeu Taupe : relais MQTT public gratuit (EMQX, HiveMQ, Mosquitto essayés dans l'ordre), message retenu « hôte en ligne », recherche de la salle sur chaque relais, identifiant gardé dans le navigateur (reconnexion automatique), reprise de la salle si l'hôte recharge sa page. Aucun serveur à installer, aucun compte.
 - Choix du **nombre de questions** et du **temps par question**
 - **100 points** par bonne réponse + jusqu'à **50 points de bonus** de rapidité
 - **Podium**, résultats de la partie et **classement général** (sauvegardé dans le navigateur)

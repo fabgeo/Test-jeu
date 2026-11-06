@@ -271,3 +271,11 @@ select {
   max-width: min(680px, calc(100% - 32px)); padding: 12px 18px; border-radius: 12px;
   background: #f59e0b; color: #1c1917; font-weight: 800; box-shadow: 0 8px 24px #0008;
 }
+
+/* Hôte parti : bandeau de reprise */
+.host-away {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 60;
+  width: min(560px, calc(100% - 32px)); padding: 14px 16px; border-radius: 14px; text-align: center;
+  background: #1e1b4b; border: 2px solid var(--warn); box-shadow: 0 10px 30px #000a; font-weight: 700;
+}
+.host-away .btn-primary { margin-top: 10px; }

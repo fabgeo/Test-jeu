@@ -50,6 +50,13 @@ const Online = (() => {
   let view = null;          // affichage local
   let localTimer = null, presenceTimer = null, beatTimer = null, pingTimer = null, hostWatch = null;
   let lastHostMsg = 0, hostAwaySince = 0;
+  // Reprise de la main si l'hôte part
+  const TAKEOVER_DELAY_MS = 20000;   // l'hôte disparu depuis 20 s : le 1er joueur présent reprend la main
+  const TAKEOVER_STEP_MS = 8000;     // puis le 2e 8 s plus tard, etc. (si le 1er n'est plus là)
+  const HANDOVER_DELAY_MS = 3000;    // l'hôte est parti volontairement : passation rapide
+  let lastBackup = null;             // (joueur) dernière sauvegarde de la partie publiée par l'hôte
+  let guestCode = null, guestBroker = 0, takeoverTimer = null, takeoverAt = 0, awayTicker = null;
+  let lastBackupJson = "";
 
   // ---------- Administration (commandes signées par l'administrateur) ----------
   // Seule la page admin possède la clé privée ; le jeu vérifie avec la clé publique (net-config.js).
@@ -107,6 +114,7 @@ const Online = (() => {
     if (!st) return;
     pub(T(st.code, "all"), { t: "hostleft", reason });
     pub(T(st.code, "host"), null, { retain: true });
+    pub(T(st.code, "backup"), null, { retain: true });
     lsSet(LS_HOST, null);
     cleanup();
     showScreen("screen-setup");
@@ -152,6 +160,8 @@ const Online = (() => {
     conns.clear();
     if (mq) { const c = mq; setTimeout(() => { try { c.end(true); } catch {} }, 400); } // laisse partir les derniers messages
     mq = null; hostConn = null; st = null; view = null; myId = null; hostAwaySince = 0;
+    clearTimeout(takeoverTimer); clearInterval(awayTicker); takeoverTimer = null; lastBackup = null; lastBackupJson = "";
+    $("#host-away").classList.add("hidden");
     showPauseButton(false);
     $("#q-players").classList.add("hidden");
     setNet("");
@@ -175,7 +185,7 @@ const Online = (() => {
   // ======================================================
   //  CÔTÉ HÔTE
   // ======================================================
-  api.host = async (resume = null) => {
+  api.host = async (resume = null, preferBroker = null) => {
     if (!window.mqtt) return setError("Le module de connexion n'a pas chargé. Vérifie ta connexion internet.");
     // (le blocage est vérifié avec la liste à jour reçue du relais juste après la connexion)
     setError("");
@@ -200,20 +210,43 @@ const Online = (() => {
     showScreen("screen-lobby");
 
     // On essaie les relais dans l'ordre ; le testament efface « hôte en ligne » si on disparaît
+    // (en cas de reprise, on essaie d'abord le relais où se trouvent déjà les joueurs)
+    const order = [preferBroker != null ? preferBroker : (resume && resume.broker), ...BROKERS.keys()]
+      .filter((v, k, a) => v != null && v >= 0 && v < BROKERS.length && a.indexOf(v) === k);
     let c = null, i = 0;
-    for (; i < BROKERS.length && !c; i++) {
-      $("#lobby-status").textContent = `Connexion au serveur ${i + 1}/${BROKERS.length}…`;
-      c = await connectTo(i, { topic: T(code, "host"), payload: "", retain: true, qos: 1 });
+    for (const [k, b] of order.entries()) {
+      $("#lobby-status").textContent = `Connexion au serveur ${k + 1}/${order.length}…`;
+      c = await connectTo(b, { topic: T(code, "host"), payload: "", retain: true, qos: 1 });
       if (my !== session) { try { c && c.end(true); } catch {} return; }
+      if (c) { i = b; break; }
     }
     if (!c) return fail("Impossible de joindre le serveur de jeu. Vérifie ta connexion internet.");
+    // Reprise : si quelqu'un d'autre est déjà hôte de cette salle, on la rejoint comme joueur
+    if (resume) {
+      const other = await new Promise((res) => {
+        const t = setTimeout(() => res(null), 2500);
+        c.on("message", (tp, buf) => { const m = parse(buf); if (tp === T(code, "host") && m && m.on && m.uid && m.uid !== UID) { clearTimeout(t); res(m); } });
+        c.subscribe(T(code, "host"), { qos: 1 });
+      });
+      if (my !== session) { try { c.end(true); } catch {} return; }
+      if (other) {
+        try { c.end(true); } catch {}
+        lsSet(LS_HOST, null);
+        cleanup();
+        return api.join(code);
+      }
+      try { c.unsubscribe(T(code, "host")); } catch {}
+    }
     mq = c;
-    st.broker = i - 1;
+    st.broker = i;
+    st.term = (st.term || 0) + (resume && resume.takeover ? 1 : 0);
+    delete st.takeover;
 
-    const announce = () => pub(T(code, "host"), { on: true, at: Date.now(), uid: UID, name: myName() }, { retain: true });
+    const announce = () => pub(T(code, "host"), { on: true, at: Date.now(), uid: UID, name: myName(), term: st ? st.term || 0 : 0 }, { retain: true });
     c.on("message", (t, buf) => {
       if (my !== session) return;
       if (t === BANS_TOPIC) return onBans(buf);
+      if (t === T(code, "host")) return onOtherHost(parse(buf), code);
       if (t !== T(code, "act")) return;
       const d = parse(buf);
       if (d && d.t === "admin") return onAdminCommand(d);
@@ -221,8 +254,10 @@ const Online = (() => {
       const id = d.from.slice(0, 40);
       onHostData(conns.get(id) || makeConn(id), d);
     });
-    c.on("connect", () => { if (my === session) c.subscribe([T(code, "act"), BANS_TOPIC], { qos: 1 }, announce); }); // après une coupure
-    c.subscribe([T(code, "act"), BANS_TOPIC], { qos: 1 }, (err) => {
+    c.on("connect", () => { if (my === session) c.subscribe([T(code, "act"), BANS_TOPIC, T(code, "host")], { qos: 1 }, announce); }); // après une coupure
+    // Coupure réseau de l'hôte : on met la question en pause pour ne pénaliser personne
+    c.on("offline", () => { if (my === session && st && st.phase === "question" && st.conf.time && !st.paused) api.togglePause(); });
+    c.subscribe([T(code, "act"), BANS_TOPIC, T(code, "host")], { qos: 1 }, (err) => {
       if (err || my !== session) return;
       announce();
       api.active = true;
@@ -235,7 +270,28 @@ const Online = (() => {
   };
 
   // Après création (ou reprise), on renvoie l'état à tout le monde
+  // Un autre hôte s'annonce sur la même salle (ex. on revient après qu'un joueur a repris la main)
+  function onOtherHost(m, code) {
+    if (!st || !mq) return;
+    // « hôte en ligne » effacé alors qu'on est toujours là (ex. départ de l'ancien hôte) : on se ré-annonce
+    if (!m || !m.on) return pub(T(code, "host"), { on: true, at: Date.now(), uid: UID, name: myName(), term: st.term || 0 }, { retain: true });
+    if (!m.uid || m.uid === UID) return;
+    if ((m.term || 0) <= (st.term || 0)) return; // c'est nous le plus récent
+    // un joueur a repris la main pendant notre absence : on redevient simple joueur
+    lsSet(LS_HOST, null);
+    cleanup();
+    api.join(code);
+  }
+
   function resumeBroadcast() {
+    if (st.phase === "takeover") {
+      // reprise par un joueur : nouvelle question à l'endroit où on s'était arrêté, en pause
+      if (st.qi >= st.questions.length) return endOnline();
+      askQuestion(st.qi);
+      if (st.conf.time) api.togglePause();
+      broadcast({ t: "notice", text: `👑 ${myName()} a repris la main. La partie reprend en pause.` });
+      return;
+    }
     if (st.phase === "lobby") return broadcastLobby();
     if (st.phase === "end") return broadcast(st.lastEnd);
     // partie en cours : on la remet en pause pour laisser les joueurs revenir
@@ -263,6 +319,23 @@ const Online = (() => {
   function broadcast(msg) {
     pub(T(st.code, "all"), msg, { qos: msg.t === "presence" ? 0 : 1 });
     handle(msg); // l'hôte s'affiche aussi le message
+  }
+
+  // Sauvegarde de la partie, lue par les joueurs pour reprendre la main si l'hôte part.
+  // Elle ne contient PAS les réponses : seulement les réglages, les scores et les questions déjà posées.
+  function publishBackup() {
+    if (!st || !mq) return;
+    const b = {
+      code: st.code, phase: st.phase, qi: st.qi, total: st.questions.length, term: st.term || 0,
+      conf: { ...st.conf, customKeys: st.conf.theme === CUSTOM_KEY ? [...customSel] : undefined },
+      asked: st.questions.slice(0, st.qi + 1).map((q) => q && q.q),
+      hostUid: UID, hostName: myName(),
+      players: st.players.map((p) => ({ id: p.id, name: p.name, score: p.score || 0, correct: p.correct || 0, left: !!p.left, status: statusOf(p) })),
+    };
+    const json = JSON.stringify(b);
+    if (json === lastBackupJson) return;
+    lastBackupJson = json;
+    pub(T(st.code, "backup"), b, { retain: true });
   }
 
   function persistHost() {
@@ -298,6 +371,7 @@ const Online = (() => {
     });
     if (st.phase === "question" && !st.paused) checkAllAnswered(); // un absent ne bloque pas la question
     persistHost();
+    publishBackup();
   }
 
   function publicPlayers() {
@@ -569,7 +643,7 @@ const Online = (() => {
     const order = [Number.isInteger(hint) ? hint : null, ...BROKERS.keys()]
       .filter((v, i, a) => v != null && v >= 0 && v < BROKERS.length && a.indexOf(v) === i);
 
-    let found = null, reached = 0;
+    let found = null, reached = 0, foundBroker = 0;
     for (const [k, i] of order.entries()) {
       setNet(`Recherche de la salle ${code} sur le serveur ${k + 1}/${order.length}…`);
       const c = await connectTo(i, { topic: T(code, "act"), payload: JSON.stringify({ t: "bye", from: UID }), retain: false, qos: 1 });
@@ -582,7 +656,7 @@ const Online = (() => {
         c.subscribe(T(code, "host"), { qos: 1 });
       });
       if (my !== session) { try { c.end(true); } catch {} return; }
-      if (ok) { found = c; break; }
+      if (ok) { found = c; foundBroker = i; break; }
       try { c.end(true); } catch {}
     }
 
@@ -600,6 +674,8 @@ const Online = (() => {
 
     // Salle trouvée sur ce relais
     const c = mq = found;
+    guestCode = code;
+    guestBroker = foundBroker;
     setNet("Salle trouvée ✔ Connexion à l'hôte…");
     hostConn = { open: true, send: (msg) => pub(T(code, "act"), { ...msg, from: UID }, { qos: msg.t === "ping" ? 0 : 1 }) };
     const hello = () => hostConn.send({ t: "join", name: myName() });
@@ -613,16 +689,17 @@ const Online = (() => {
       if (my !== session) return;
       if (t === BANS_TOPIC) return onBans(buf);
       const d = parse(buf);
+      if (t === T(code, "backup")) { if (d && d.code === code) lastBackup = d; return; }
       if (t === T(code, "host")) {
         if (!d || !d.on) hostDisconnected();
-        else if (hostAwaySince) { hostAwaySince = 0; hello(); } // l'hôte est revenu : on se resynchronise
+        else if (hostAwaySince) { hostBack(); hello(); } // l'hôte (ou un nouvel hôte) est là : on se resynchronise
         return;
       }
       if (!d || typeof d !== "object") return;
       const isPrivate = t === T(code, "p/" + UID);
       if (!api.active && !isPrivate) return; // pas encore accepté dans la salle
       lastHostMsg = Date.now();
-      if (d.t === "hostleft") return onHostLost(d.reason);
+      if (d.t === "hostleft") return d.handover && !d.reason ? hostDisconnected(true) : onHostLost(d.reason);
       if (d.t === "welcome") {
         clearTimeout(welcomeTimeout); restoreBtn(); setNet("");
         clearInterval(pingTimer); pingTimer = setInterval(sendPing, PING_MS);
@@ -633,7 +710,7 @@ const Online = (() => {
       }
       handle(d);
     });
-    const topics = [T(code, "all"), T(code, "p/" + UID), T(code, "host"), BANS_TOPIC];
+    const topics = [T(code, "all"), T(code, "p/" + UID), T(code, "host"), T(code, "backup"), BANS_TOPIC];
     c.on("connect", () => { if (my === session) c.subscribe(topics, { qos: 1 }, hello); }); // après une coupure
     c.subscribe(topics, { qos: 1 }, hello);
   };
@@ -642,13 +719,76 @@ const Online = (() => {
     if (hostConn) hostConn.send({ t: "ping", visible: !document.hidden });
   }
 
-  // L'hôte a perdu sa connexion (ex. téléphone en veille, page rechargée) : on attend son retour
-  function hostDisconnected() {
+  // L'hôte est parti (coupure, veille, page fermée…) : pause, puis un joueur présent reprend la main
+  function hostDisconnected(handover) {
+    if (!api.active || isHost) return;
+    if (hostAwaySince && !handover) return; // déjà en attente (le départ volontaire, plus rapide, reste prioritaire)
     if (!hostAwaySince) hostAwaySince = Date.now();
-    const msg = "⚠️ L'hôte s'est déconnecté… en attente de son retour.";
-    if (view && view.phase === "lobby") $("#lobby-status").textContent = msg;
-    else $("#q-wait").textContent = msg;
+    // la question est figée : plus de chrono ni de réponse tant que personne ne mène la partie
+    if (view && view.phase === "question" && !view.paused) {
+      view.paused = true; view.pausedAt = Date.now();
+      clearInterval(localTimer);
+      setPauseUI(true, false, "L'hôte s'est déconnecté. Partie en pause.");
+    }
+    // ordre de reprise : les joueurs présents, dans leur ordre d'arrivée
+    const line = lastBackup ? lastBackup.players.filter((p) => p.id !== "host" && !p.left && p.status !== "absent").map((p) => p.id) : [];
+    const rank = line.indexOf(UID);
+    clearTimeout(takeoverTimer);
+    takeoverAt = 0;
+    if (rank >= 0 && lastBackup.phase !== "end") {
+      const delay = (handover ? HANDOVER_DELAY_MS : TAKEOVER_DELAY_MS) + rank * TAKEOVER_STEP_MS;
+      takeoverAt = Date.now() + delay;
+      takeoverTimer = setTimeout(takeOver, delay);
+    }
+    $("#takeover-btn").classList.toggle("hidden", rank < 0 || !lastBackup || lastBackup.phase === "end");
+    $("#host-away").classList.remove("hidden");
+    clearInterval(awayTicker);
+    const tick = () => {
+      const left = takeoverAt ? Math.max(0, Math.ceil((takeoverAt - Date.now()) / 1000)) : 0;
+      $("#host-away-text").textContent = (handover ? "👋 L'hôte a quitté la partie." : "⏸ L'hôte s'est déconnecté — partie en pause.") +
+        (takeoverAt ? (rank === 0 ? ` Tu reprends la main dans ${left} s si personne ne le fait.` : ` Un autre joueur va reprendre la main (${left} s).`) : " En attente de son retour…");
+    };
+    tick();
+    awayTicker = setInterval(tick, 500);
   }
+
+  function hostBack() {
+    hostAwaySince = 0;
+    clearTimeout(takeoverTimer); takeoverTimer = null;
+    clearInterval(awayTicker);
+    $("#host-away").classList.add("hidden");
+  }
+
+  // Ce joueur devient l'hôte : il reconstruit la partie à partir de la sauvegarde (sans les réponses)
+  function takeOver() {
+    const b = lastBackup;
+    if (!b || isHost || !hostAwaySince || !guestCode) return;
+    clearTimeout(takeoverTimer);
+    const code = guestCode, broker = guestBroker;
+    if (b.conf.theme === CUSTOM_KEY && Array.isArray(b.conf.customKeys)) { customSel = new Set(b.conf.customKeys); updateCustomTheme(); }
+    // Joueurs : moi -> "host" (en tête de liste) ; l'ancien hôte garde ses points sous son identifiant (s'il revient)
+    const players = b.players.map((p) =>
+      p.id === UID ? { ...p, id: "host", left: false } :
+      p.id === "host" ? { ...p, id: b.hostUid || "ancien-hote", left: true, lastSeen: 0 } : { ...p, lastSeen: 0 });
+    players.sort((x, y) => (y.id === "host") - (x.id === "host"));
+    // Questions : celles déjà posées sont gardées (texte seul), les suivantes sont tirées à nouveau
+    let start = b.qi;
+    if (b.phase === "reveal") start = b.qi + 1;                 // la réponse était déjà donnée
+    const asked = new Set((b.asked || []).filter(Boolean));
+    const fresh = (b.conf.hard ? buildHardQuestions(b.conf.theme, 9999) : buildQuestions(b.conf.theme, 9999)).filter((q) => !asked.has(q.q));
+    const questions = [];
+    for (let k = 0; k < b.total; k++) questions.push(k < start ? { q: (b.asked || [])[k] || "", choices: [], answer: 0 } : fresh.shift());
+    const st2 = {
+      code, phase: b.phase === "lobby" ? "lobby" : b.phase === "end" ? "end" : "takeover", qi: start,
+      questions: questions.filter(Boolean), answers: {}, paused: false, broker, term: b.term || 0, takeover: true,
+      conf: { ...b.conf }, players,
+    };
+    if (st2.phase === "end") st2.lastEnd = null;
+    lsSet(LS_GUEST, null);
+    cleanup();
+    api.host(st2, broker);
+  }
+  $("#takeover-btn").onclick = () => takeOver();
 
   function onHostLost(reason) {
     if (!api.active) return;
@@ -666,7 +806,14 @@ const Online = (() => {
   // Quitter volontairement
   api.leave = () => {
     if (isHost && st) {
-      pub(T(st.code, "all"), { t: "hostleft" });
+      const others = st.players.some((p) => p.id !== "host" && statusOf(p) !== "absent");
+      if (others && st.phase !== "end") {
+        publishBackup();
+        pub(T(st.code, "all"), { t: "hostleft", handover: true }); // un joueur va reprendre la main
+      } else {
+        pub(T(st.code, "all"), { t: "hostleft" });
+        pub(T(st.code, "backup"), null, { retain: true });
+      }
       pub(T(st.code, "host"), null, { retain: true }); // efface « hôte en ligne »
       lsSet(LS_HOST, null);
     } else if (hostConn) {

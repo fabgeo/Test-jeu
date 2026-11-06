@@ -2,7 +2,9 @@
 
 Jeu de questions à 4 réponses, jouable dans le navigateur.
 
-- Mode **solo** ou **multijoueur** (2 à 8 joueurs sur le même appareil, chacun son tour)
+- Mode **solo**
+- Mode **même appareil** (2 à 8 joueurs, chacun son tour)
+- Mode **en ligne** 🌐 : chacun sur son ordi/téléphone. Un joueur crée une salle (code à 5 lettres + lien à partager), les autres la rejoignent. Connexion directe entre navigateurs (PeerJS / WebRTC), aucun serveur à installer.
 - Choix du **nombre de questions** et du **temps par question**
 - **100 points** par bonne réponse + jusqu'à **50 points de bonus** de rapidité
 - **Podium**, résultats de la partie et **classement général** (sauvegardé dans le navigateur)

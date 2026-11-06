@@ -18,7 +18,8 @@
         <h2>Mode de jeu</h2>
         <div class="toggle-group" id="mode-group">
           <button class="toggle active" data-mode="solo">👤 Solo</button>
-          <button class="toggle" data-mode="multi">👥 Multijoueur</button>
+          <button class="toggle" data-mode="multi">👥 Même appareil</button>
+          <button class="toggle" data-mode="online">🌐 En ligne</button>
         </div>
 
         <div id="players-zone">
@@ -27,6 +28,19 @@
           <button id="add-player" class="btn-secondary">+ Ajouter un joueur</button>
         </div>
 
+        <div id="online-zone" class="hidden">
+          <h3>Ton pseudo</h3>
+          <div class="player-row"><input type="text" id="online-name" maxlength="20" placeholder="Ton pseudo" /></div>
+          <h3>Rejoindre une salle</h3>
+          <div class="player-row">
+            <input type="text" id="join-code" maxlength="5" placeholder="CODE" class="code-input" />
+            <button id="join-btn" class="btn-join">Rejoindre</button>
+          </div>
+          <p class="hint">…ou crée ta propre salle avec les réglages ci-dessous 👇</p>
+          <p id="online-error" class="feedback bad"></p>
+        </div>
+
+        <div id="settings-zone">
         <h2>Thème</h2>
         <div id="themes-list" class="themes"></div>
 
@@ -44,8 +58,32 @@
           <button class="toggle" data-time="30">30 s</button>
         </div>
 
+        </div>
+
         <button id="start-btn" class="btn-primary">Lancer la partie ▶</button>
         <button id="show-board-btn" class="btn-link">🏆 Voir le classement général</button>
+      </div>
+    </section>
+
+    <!-- ===== SALLE D'ATTENTE (en ligne) ===== -->
+    <section id="screen-lobby" class="screen">
+      <div class="card center">
+        <h1>🌐 Salle d'attente</h1>
+        <p class="subtitle">Code de la salle</p>
+        <div id="lobby-code" class="room-code">…</div>
+        <div id="lobby-share">
+          <p class="hint">Envoie ce lien à tes amis :</p>
+          <div class="player-row">
+            <input type="text" id="lobby-link" readonly />
+            <button id="copy-link" class="btn-join">Copier</button>
+          </div>
+        </div>
+        <p id="lobby-info" class="hint"></p>
+        <h3>Joueurs connectés</h3>
+        <ul id="lobby-players" class="lobby-players"></ul>
+        <p id="lobby-status" class="hint"></p>
+        <button id="lobby-start" class="btn-primary hidden">Démarrer la partie ▶</button>
+        <button id="lobby-leave" class="btn-secondary">Quitter la salle</button>
       </div>
     </section>
 
@@ -73,6 +111,8 @@
         <h2 id="q-text"></h2>
         <div id="q-choices" class="choices"></div>
         <p id="q-feedback" class="feedback"></p>
+        <p id="q-wait" class="hint"></p>
+        <div id="q-live" class="live-scores"></div>
         <button id="next-btn" class="btn-primary hidden">Suivant ➜</button>
       </div>
     </section>
@@ -110,6 +150,8 @@
   </main>
 
   <script src="js/questions.js"></script>
+  <script src="js/lib/peerjs.min.js"></script>
   <script src="js/game.js"></script>
+  <script src="js/online.js"></script>
 </body>
 </html>

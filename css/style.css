@@ -134,3 +134,16 @@ select {
   padding: 8px 12px; border-radius: 10px; background: var(--bg2);
   color: var(--text); border: 1px solid var(--border); font: inherit;
 }
+
+/* ---------- Mode en ligne ---------- */
+.hint { color: var(--muted); font-size: .9rem; margin: 8px 0; }
+.code-input { text-transform: uppercase; letter-spacing: 4px; font-weight: 800; text-align: center; }
+.btn-join { width: auto !important; padding: 0 16px; background: var(--primary) !important; border: none !important; font-weight: 700; }
+.room-code { font-size: 3rem; font-weight: 900; letter-spacing: 10px; color: #c7d2fe; margin: 4px 0 12px; }
+.lobby-players { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.lobby-players li { background: var(--bg2); border: 1px solid var(--border); padding: 8px 14px; border-radius: 999px; font-weight: 600; }
+.live-scores { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 12px; }
+.live-scores span { font-size: .85rem; background: var(--bg); border: 1px solid var(--border); padding: 4px 10px; border-radius: 999px; }
+.live-scores .ok { border-color: var(--good); color: #86efac; }
+.live-scores .ko { border-color: var(--bad); color: #fca5a5; }
+.choice.picked { border-color: var(--primary); background: #312e81; }

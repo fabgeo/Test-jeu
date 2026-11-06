@@ -74,7 +74,7 @@ function updateRange() {
 
 function renderPlayers() {
   const zone = $("#players-zone");
-  zone.classList.toggle("hidden", settings.mode === "solo");
+  zone.classList.toggle("hidden", settings.mode !== "multi");
   const list = $("#players-list");
   list.innerHTML = "";
   const shown = settings.mode === "solo" ? settings.players.slice(0, 1) : settings.players;
@@ -97,6 +97,7 @@ function setupListeners() {
     b.classList.add("active");
     settings.mode = b.dataset.mode;
     renderPlayers();
+    updateModeUI();
   });
 
   $$("#time-group .toggle").forEach((b) => b.onclick = () => {
@@ -117,17 +118,23 @@ function setupListeners() {
     }
   };
 
-  $("#start-btn").onclick = startGame;
+  $("#start-btn").onclick = () => (settings.mode === "online" ? Online.host() : startGame());
   $("#turn-ready").onclick = showQuestion;
-  $("#next-btn").onclick = nextTurn;
-  $("#replay-btn").onclick = startGame;
-  $("#home-btn").onclick = () => showScreen("screen-setup");
+  $("#next-btn").onclick = () => (Online.active ? Online.next() : nextTurn());
+  $("#replay-btn").onclick = () => (Online.active ? Online.backToLobby() : startGame());
+  $("#home-btn").onclick = () => { if (Online.active) Online.leave(); showScreen("screen-setup"); };
   $("#show-board-btn").onclick = () => openBoard("screen-setup");
   $("#board-btn").onclick = () => openBoard("screen-results");
   $("#board-filter").onchange = renderBoard;
   $("#board-clear").onclick = () => {
     if (confirm("Effacer tout le classement général ?")) { saveBoard([]); renderBoard(); }
   };
+}
+
+function updateModeUI() {
+  const online = settings.mode === "online";
+  $("#online-zone").classList.toggle("hidden", !online);
+  $("#start-btn").textContent = online ? "Créer une salle en ligne 🌐" : "Lancer la partie ▶";
 }
 
 // ---------- Déroulement de la partie ----------
@@ -176,6 +183,8 @@ function showQuestion() {
   $("#q-text").textContent = q.q;
   $("#q-feedback").textContent = "";
   $("#q-feedback").className = "feedback";
+  $("#q-wait").textContent = "";
+  $("#q-live").innerHTML = "";
   $("#next-btn").classList.add("hidden");
 
   const box = $("#q-choices");
@@ -252,10 +261,7 @@ function nextTurn() {
 }
 
 // ---------- Fin de partie ----------
-function endGame() {
-  const ranking = [...game.players].sort((a, b) => b.score - a.score);
-  const total = game.questions.length;
-
+function renderResults(ranking, total) {
   // Podium
   const podium = $("#podium");
   podium.innerHTML = "";
@@ -273,6 +279,15 @@ function endGame() {
   $("#results-body").innerHTML = ranking.map((p, i) =>
     `<tr><td>${i + 1}</td><td>${escapeHtml(p.name)}</td><td>${p.correct} / ${total}</td><td>${p.score}</td></tr>`
   ).join("");
+}
+
+function endGame() {
+  const ranking = [...game.players].sort((a, b) => b.score - a.score);
+  const total = game.questions.length;
+  renderResults(ranking, total);
+  $("#replay-btn").classList.remove("hidden");
+  $("#replay-btn").textContent = "Rejouer ↻";
+  $("#home-btn").textContent = "Menu principal";
 
   // Sauvegarde dans le classement général
   const board = loadBoard();

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quiz Culture G</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <main class="app">
+
+    <!-- ===== ÉCRAN D'ACCUEIL / RÉGLAGES ===== -->
+    <section id="screen-setup" class="screen active">
+      <h1>🧠 Quiz Culture G</h1>
+      <p class="subtitle">4 réponses, 1 seule bonne. Qui sera le meilleur ?</p>
+
+      <div class="card">
+        <h2>Mode de jeu</h2>
+        <div class="toggle-group" id="mode-group">
+          <button class="toggle active" data-mode="solo">👤 Solo</button>
+          <button class="toggle" data-mode="multi">👥 Multijoueur</button>
+        </div>
+
+        <div id="players-zone">
+          <h3>Joueurs</h3>
+          <div id="players-list"></div>
+          <button id="add-player" class="btn-secondary">+ Ajouter un joueur</button>
+        </div>
+
+        <h2>Thème</h2>
+        <div id="themes-list" class="themes"></div>
+
+        <h2>Nombre de questions</h2>
+        <div class="range-row">
+          <input type="range" id="nb-questions" min="5" max="40" step="1" value="10" />
+          <span id="nb-questions-value" class="badge">10</span>
+        </div>
+
+        <h2>Temps par question</h2>
+        <div class="toggle-group" id="time-group">
+          <button class="toggle" data-time="0">Illimité</button>
+          <button class="toggle" data-time="10">10 s</button>
+          <button class="toggle active" data-time="20">20 s</button>
+          <button class="toggle" data-time="30">30 s</button>
+        </div>
+
+        <button id="start-btn" class="btn-primary">Lancer la partie ▶</button>
+        <button id="show-board-btn" class="btn-link">🏆 Voir le classement général</button>
+      </div>
+    </section>
+
+    <!-- ===== ÉCRAN DE PASSAGE (multijoueur) ===== -->
+    <section id="screen-turn" class="screen">
+      <div class="card center">
+        <p class="subtitle">Question <span id="turn-qnum"></span></p>
+        <h2>C'est au tour de</h2>
+        <div id="turn-player" class="big-name"></div>
+        <button id="turn-ready" class="btn-primary">Je suis prêt(e) !</button>
+      </div>
+    </section>
+
+    <!-- ===== ÉCRAN QUESTION ===== -->
+    <section id="screen-question" class="screen">
+      <div class="topbar">
+        <span id="q-player" class="badge"></span>
+        <span id="q-progress"></span>
+        <span id="q-score" class="badge"></span>
+      </div>
+      <div class="progress"><div id="progress-bar"></div></div>
+      <div class="timer" id="timer-wrap"><div id="timer-bar"></div></div>
+
+      <div class="card">
+        <h2 id="q-text"></h2>
+        <div id="q-choices" class="choices"></div>
+        <p id="q-feedback" class="feedback"></p>
+        <button id="next-btn" class="btn-primary hidden">Suivant ➜</button>
+      </div>
+    </section>
+
+    <!-- ===== ÉCRAN RÉSULTATS ===== -->
+    <section id="screen-results" class="screen">
+      <div class="card center">
+        <h1>🏁 Résultats</h1>
+        <div id="podium"></div>
+        <table class="board">
+          <thead><tr><th>#</th><th>Joueur</th><th>Bonnes rép.</th><th>Points</th></tr></thead>
+          <tbody id="results-body"></tbody>
+        </table>
+        <button id="replay-btn" class="btn-primary">Rejouer ↻</button>
+        <button id="home-btn" class="btn-secondary">Menu principal</button>
+        <button id="board-btn" class="btn-link">🏆 Classement général</button>
+      </div>
+    </section>
+
+    <!-- ===== ÉCRAN CLASSEMENT GÉNÉRAL ===== -->
+    <section id="screen-board" class="screen">
+      <div class="card center">
+        <h1>🏆 Classement général</h1>
+        <p class="subtitle">Meilleurs scores enregistrés sur cet appareil</p>
+        <select id="board-filter"></select>
+        <table class="board">
+          <thead><tr><th>#</th><th>Joueur</th><th>Thème</th><th>Score</th><th>Points</th><th>Date</th></tr></thead>
+          <tbody id="board-body"></tbody>
+        </table>
+        <button id="board-back" class="btn-primary">Retour</button>
+        <button id="board-clear" class="btn-link danger">Effacer le classement</button>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="js/questions.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>

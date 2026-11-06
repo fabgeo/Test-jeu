@@ -8,7 +8,7 @@
 // =========================================================
 (() => {
   // Clé privée chiffrée (PBKDF2 + AES-GCM) : inutilisable sans le mot de passe
-  const VAULT = {"salt":"BeXNnwc+V95qMIBaKT55Mg==","iv":"W5xEPh3/0eARZbrr","ct":"rHqkGJtMySMsgYBHoAmi+ciOKRoqlwEwtwBLLz5WQTDDRsbmOjaHm28YwjPSWjuwk4kaKr0oDbuCMBhaWe4LHD886i8eJoTypf2rIrc44/1bqm086pEWNRdqEjEEVcWG8SYLDPVRT2PlxV3g83lj10ovaTa0rumwCEn+vipST6Qoxi5MAY1j9dZ/7JA9pC39Bhz0XUEy8ke1D/P953dgyFzcorPudGy4xnBwPoSKBSaOBVT/By7LDY2ewd8wg6rOqDstgcvnDhoa4tU9l/nZsf0bL0me/8iXUyFkI0B2","iterations":2000000};
+  const VAULT = {"salt":"Yhz62Pl7/MZbqOAD1lrnGg==","iv":"MvtPNrqx+OvoHaNz","ct":"ors9/KH0npdpwNAyuoxDiB4ieP0iEhf+gWlljC8N1qF6bD0hZbZ37nxMipu8ey4V8fmuVJ0n7V7if7oOJm4wMo4wwfUtrLo7VEs5fmbnZO07oXm+WB7K27Vtjwz+JXgnfJKZ5j8GrWx2Rz1LNflhScqjdTCurCEqlmlMTO1VbKReuwD1Ayuih3d9VCTlk8vApUilFwSb/pkcw8eHeBddowLwk/7mMXtZH1RJJyEiz8A89NExjfujXqGn4XV+AVZBPGI8ToHqWYBXRE10MIspHLA52ncLe0WOR8SR11sG","iterations":2000000};
 
   const params = new URLSearchParams(location.search);
   const ROOT = NET.ROOT;

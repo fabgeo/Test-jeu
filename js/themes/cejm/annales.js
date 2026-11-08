@@ -91,7 +91,37 @@
       choices: ["Savoir, savoir-faire et savoir-être", "Salaire, statut et ancienneté", "Locaux, matériel et logiciels", "Diplôme, âge et expérience"], answer: 0,
       explain: "Savoir (connaissances), savoir-faire (habiletés pratiques), savoir-être (comportements). Ils se développent par la formation." },
 
+    // ---------- Styles de management (ch. 12) ----------
+    { q: N24 + "Le père de Martin Loiret « se souciait du bien-être de ses salariés » et « offrait des récompenses ». Son style (Likert) était…",
+      choices: ["Paternaliste", "Participatif", "Consultatif", "Autoritaire"], answer: 0,
+      explain: "Paternaliste : le dirigeant décide seul mais utilise les récompenses et se soucie du bien-être des salariés." },
+    { q: N24 + "Martin Loiret veut que les collaborateurs « participent aux décisions lorsqu'ils maîtrisent une partie du problème ». Son style est…",
+      choices: ["Participatif", "Paternaliste", "Consultatif", "Autoritaire"], answer: 0,
+      explain: "Participatif : les salariés prennent part aux décisions. Consultatif : on les consulte, mais sans vraie influence." },
+    { q: T25 + "Dominique décide seul, mais organise des repas et verse une prime à ses salariés. Son style (Likert) est plutôt…",
+      choices: ["Paternaliste", "Participatif", "Consultatif", "Autoritaire"], answer: 0,
+      explain: "Corrigé 2025 : décisions prises seul + attention portée au bien-être et récompenses = style paternaliste." },
+
+    // ---------- Faire ou faire faire (ch. 9) ----------
+    { q: T25 + "Confier à une autre entreprise une partie de sa production s'appelle…",
+      choices: ["La sous-traitance", "La franchise", "L'intégration", "La concentration"], answer: 0,
+      explain: "Ton cours (« Faire ou faire faire ? ») : la sous-traitance confie une partie de la production à une autre entreprise." },
+    { q: T25 + "Dans la chaîne de valeur de Porter, la production des kits de bijoux est une activité…",
+      choices: ["Principale", "De soutien", "De pilotage", "Secondaire"], answer: 0,
+      explain: "Activités principales (concourent directement à la production) : logistique, production, commercialisation, services." },
+    { q: T25 + "Pourquoi est-il pertinent pour Dominique de fabriquer lui-même ses kits ?",
+      choices: ["Il garde sa marge de 65 % et son savoir-faire", "La sous-traitance est interdite pour les PME", "Il n'a aucun coût de production en interne", "Ses salariés refusent tout changement"], answer: 0,
+      explain: "Corrigé 2025 : sous-traiter réduirait la marge et rendrait l'entreprise dépendante de partenaires extérieurs." },
+
+    // ---------- Politique structurelle (ch. 6) ----------
+    { q: P26 + "Le label « Entreprise du Patrimoine Vivant », reconduit par la loi de finances, vise à structurer durablement la filière des métiers d'art. C'est une politique…",
+      choices: ["Structurelle", "Conjoncturelle", "De rigueur", "Monétaire"], answer: 0,
+      explain: "Q 3.1 du sujet 2026. Politique structurelle = transformer durablement l'environnement économique (long terme)." },
+
     // ---------- Financement (ch. 13) ----------
+    { q: P26 + "La marge d'autofinancement de la savonnerie est faible et sa capacité d'emprunt limitée. Quelle autre solution de ton cours reste possible ?",
+      choices: ["Une augmentation de capital", "Un découvert bancaire permanent", "Une baisse de son capital social", "Une hausse des délais clients"], answer: 0,
+      explain: "Augmenter le capital fait entrer de nouveaux associés… qui obtiennent une part du contrôle." },
     { q: N24 + "Notarius veut réduire les délais de paiement de ses clients de 60 à 30 jours. Quel est l'effet sur le BFR ?",
       choices: ["Le BFR baisse", "Le BFR augmente", "Le BFR ne change pas", "Le BFR devient égal au capital"], answer: 0,
       explain: "Q 3.2 du sujet 2024 : les clients paient plus tôt, donc le besoin de financement diminue (1 des 3 leviers)." },

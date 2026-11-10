@@ -292,3 +292,13 @@ select {
 .pp-note { color: var(--muted); font-size: .85rem; margin-top: 6px; }
 .lobby-players .kick { margin-left: 4px; }
 .q-card.has-panel { min-height: 880px; }
+
+/* Couleurs des matières dans le choix du thème : CEJM en bleu, Compta en vert */
+.theme-group.grp-cejm { border-color: #3b82f6; background: #1e3a8a33; }
+.theme-group.grp-cejm summary { color: #93c5fd; }
+.theme-group.grp-cejm .theme { border-color: #3b82f6aa; background: #172554; }
+.theme-group.grp-cejm .theme.active { border-color: #60a5fa; background: #1e40af; box-shadow: 0 0 0 2px #60a5fa66; }
+.theme-group.grp-compta { border-color: #22c55e; background: #14532d33; }
+.theme-group.grp-compta summary { color: #86efac; }
+.theme-group.grp-compta .theme { border-color: #22c55eaa; background: #052e16; }
+.theme-group.grp-compta .theme.active { border-color: #4ade80; background: #166534; box-shadow: 0 0 0 2px #4ade8066; }

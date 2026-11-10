@@ -161,7 +161,7 @@ function renderThemes() {
   themeGroups().forEach((items, group) => {
     const hasActive = items.some(([k]) => k === settings.theme);
     const det = document.createElement("details");
-    det.className = "theme-group";
+    det.className = "theme-group" + (group.startsWith("CEJM") ? " grp-cejm" : group.startsWith("Compta") ? " grp-compta" : "");
     det.open = openGroups.has(group) || hasActive;
     det.ontoggle = () => { if (det.open) openGroups.add(group); else openGroups.delete(group); };
     det.innerHTML = `<summary>${escapeHtml(group)} <span class="t-count">(${items.length})</span></summary>`;

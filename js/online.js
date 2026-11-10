@@ -871,6 +871,8 @@ const Online = (() => {
     else if (hostConn) hostConn.send({ t: "answer", qi: view.qi, choice, ms, text });
   }
 
+  api.isHost = () => !!isHost;
+
   // Quitter volontairement
   api.leave = () => {
     if (isHost && st) {

@@ -254,6 +254,7 @@ function setupListeners() {
   $("#validate-btn").onclick = () => { if (game && game.selected >= 0) answer(game.selected); };
   $("#pause-btn").onclick = () => (Online.active ? Online.togglePause() : togglePauseLocal());
   $("#resume-btn").onclick = () => (Online.active ? Online.togglePause() : togglePauseLocal());
+  $("#quit-btn").onclick = quitGame;
   $("#start-btn").onclick = () => {
     if (!playableCount(settings.theme, settings.hard)) { $("#setup-msg").textContent = "Coche au moins un chapitre dans « Mes chapitres »."; return; }
     $("#setup-msg").textContent = "";
@@ -470,7 +471,7 @@ function startTimer() {
   game.startTime = Date.now();
   game.paused = false;
   setPauseUI(false);
-  if (!settings.time) { $("#timer-wrap").classList.add("hidden"); showPauseButton(false); return; }
+  if (!settings.time) { $("#timer-wrap").classList.add("hidden"); showPauseButton(true); return; } // pause possible (pour quitter)
   $("#timer-wrap").classList.remove("hidden");
   showPauseButton(true);
   runTimer();
@@ -487,18 +488,36 @@ function runTimer() {
 }
 
 function togglePauseLocal() {
-  if (!game || game.answered || !settings.time) return;
+  if (!game || game.answered) return;
   if (!game.paused) {
     game.paused = true;
     game.pausedAt = Date.now();
     clearInterval(timerId);
-    setPauseUI(true, true, "Le chrono est arrêté. La question est cachée.");
+    setPauseUI(true, true, settings.time ? "Le chrono est arrêté. La question est cachée." : "La question est cachée.");
   } else {
     game.startTime += Date.now() - game.pausedAt; // le temps de pause ne compte pas
     game.paused = false;
     setPauseUI(false);
-    runTimer();
+    if (settings.time) runTimer();
   }
+}
+
+// Quitter la partie en cours (depuis la pause) : rien n'est enregistré au classement
+function quitGame() {
+  if (Online.active) {
+    const msg = Online.isHost && Online.isHost()
+      ? "Quitter la partie ? Un autre joueur présent reprendra la main."
+      : "Quitter la partie en ligne ?";
+    if (!confirm(msg)) return;
+    Online.leave();
+    return;
+  }
+  if (!confirm("Quitter la partie ? Ton score ne sera pas enregistré.")) return;
+  clearInterval(timerId);
+  if (game) { game.paused = false; game.answered = true; }
+  setPauseUI(false);
+  showPauseButton(false);
+  showScreen("screen-setup");
 }
 
 // Un clic sélectionne la case (on peut changer), « Valider » confirme
